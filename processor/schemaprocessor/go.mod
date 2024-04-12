@@ -11,7 +11,7 @@ require (
 	go.opentelemetry.io/collector/pdata v1.5.1-0.20240412014414-62f589864e3d
 	go.opentelemetry.io/collector/processor v0.98.1-0.20240412014414-62f589864e3d
 	go.opentelemetry.io/otel/metric v1.25.0
-	go.opentelemetry.io/otel/schema v0.0.7
+	go.opentelemetry.io/otel/schema v0.0.8
 	go.opentelemetry.io/otel/trace v1.25.0
 	go.uber.org/goleak v1.3.0
 	go.uber.org/multierr v1.11.0

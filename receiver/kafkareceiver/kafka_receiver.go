@@ -485,8 +485,11 @@ func (c *TracesConsumerGroupHandler) Cleanup(session sarama.ConsumerGroupSession
 
 func (c *TracesConsumerGroupHandler) ConsumeClaim(session sarama.ConsumerGroupSession, claim sarama.ConsumerGroupClaim) error {
 	c.logger.Info("Starting consumer group", zap.Int32("partition", claim.Partition()))
-	if err := c.hook.BeforeConsumeClaim(session, claim); err != nil {
-		return err
+	if c.hook != nil {
+		err := c.hook.BeforeConsumeClaim(session, claim)
+		if err != nil {
+			return err
+		}
 	}
 
 	commit := func(hook HandlerHook, session sarama.ConsumerGroupSession) {

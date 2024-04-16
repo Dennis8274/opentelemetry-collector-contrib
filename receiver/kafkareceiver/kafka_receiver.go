@@ -277,6 +277,7 @@ func (c *KafkaMetricsConsumer) Start(_ context.Context, _ component.Host) error 
 		autocommitEnabled: c.autocommitEnabled,
 		messageMarking:    c.messageMarking,
 		headerExtractor:   &nopHeaderExtractor{},
+		hook:              c.hook,
 	}
 
 	if c.headerExtraction {
@@ -369,6 +370,7 @@ func (c *KafkaLogsConsumer) Start(_ context.Context, _ component.Host) error {
 		autocommitEnabled: c.autocommitEnabled,
 		messageMarking:    c.messageMarking,
 		headerExtractor:   &nopHeaderExtractor{},
+		hook:              c.hook,
 	}
 
 	if c.headerExtraction {

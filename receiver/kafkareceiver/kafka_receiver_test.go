@@ -38,7 +38,7 @@ func TestNewTracesReceiver_version_err(t *testing.T) {
 		ProtocolVersion: "none",
 	}
 	unmarshaler := defaultTracesUnmarshalers()[c.Encoding]
-	r, err := newTracesReceiver(c, receivertest.NewNopCreateSettings(), unmarshaler, consumertest.NewNop())
+	r, err := newTracesReceiver(c, receivertest.NewNopCreateSettings(), unmarshaler, nil, consumertest.NewNop())
 	require.NoError(t, err)
 	err = r.Start(context.Background(), componenttest.NewNopHost())
 	assert.Error(t, err)
@@ -49,7 +49,7 @@ func TestNewTracesReceiver_encoding_err(t *testing.T) {
 		Encoding: "foo",
 	}
 	unmarshaler := defaultTracesUnmarshalers()[c.Encoding]
-	r, err := newTracesReceiver(c, receivertest.NewNopCreateSettings(), unmarshaler, consumertest.NewNop())
+	r, err := newTracesReceiver(c, receivertest.NewNopCreateSettings(), unmarshaler, nil, consumertest.NewNop())
 	require.Error(t, err)
 	assert.Nil(t, r)
 	assert.EqualError(t, err, errUnrecognizedEncoding.Error())
@@ -71,7 +71,7 @@ func TestNewTracesReceiver_err_auth_type(t *testing.T) {
 		},
 	}
 	unmarshaler := defaultTracesUnmarshalers()[c.Encoding]
-	r, err := newTracesReceiver(c, receivertest.NewNopCreateSettings(), unmarshaler, consumertest.NewNop())
+	r, err := newTracesReceiver(c, receivertest.NewNopCreateSettings(), unmarshaler, nil, consumertest.NewNop())
 	require.NoError(t, err)
 	err = r.Start(context.Background(), componenttest.NewNopHost())
 	assert.Contains(t, err.Error(), "failed to load TLS config")
@@ -83,7 +83,7 @@ func TestNewTracesReceiver_initial_offset_err(t *testing.T) {
 		Encoding:      defaultEncoding,
 	}
 	unmarshaler := defaultTracesUnmarshalers()[c.Encoding]
-	r, err := newTracesReceiver(c, receivertest.NewNopCreateSettings(), unmarshaler, consumertest.NewNop())
+	r, err := newTracesReceiver(c, receivertest.NewNopCreateSettings(), unmarshaler, nil, consumertest.NewNop())
 	require.NoError(t, err)
 	err = r.Start(context.Background(), componenttest.NewNopHost())
 	require.Error(t, err)
@@ -305,7 +305,7 @@ func TestNewMetricsReceiver_version_err(t *testing.T) {
 		ProtocolVersion: "none",
 	}
 	unmarshaler := defaultMetricsUnmarshalers()[c.Encoding]
-	r, err := newMetricsReceiver(c, receivertest.NewNopCreateSettings(), unmarshaler, consumertest.NewNop())
+	r, err := newMetricsReceiver(c, receivertest.NewNopCreateSettings(), unmarshaler, nil, consumertest.NewNop())
 	require.NoError(t, err)
 	err = r.Start(context.Background(), componenttest.NewNopHost())
 	assert.Error(t, err)
@@ -316,7 +316,7 @@ func TestNewMetricsReceiver_encoding_err(t *testing.T) {
 		Encoding: "foo",
 	}
 	unmarshaler := defaultMetricsUnmarshalers()[c.Encoding]
-	_, err := newMetricsReceiver(c, receivertest.NewNopCreateSettings(), unmarshaler, consumertest.NewNop())
+	_, err := newMetricsReceiver(c, receivertest.NewNopCreateSettings(), unmarshaler, nil, consumertest.NewNop())
 	require.Error(t, err)
 	assert.EqualError(t, err, errUnrecognizedEncoding.Error())
 }
@@ -337,7 +337,7 @@ func TestNewMetricsExporter_err_auth_type(t *testing.T) {
 		},
 	}
 	unmarshaler := defaultMetricsUnmarshalers()[c.Encoding]
-	r, err := newMetricsReceiver(c, receivertest.NewNopCreateSettings(), unmarshaler, consumertest.NewNop())
+	r, err := newMetricsReceiver(c, receivertest.NewNopCreateSettings(), unmarshaler, nil, consumertest.NewNop())
 	require.NoError(t, err)
 	err = r.Start(context.Background(), componenttest.NewNopHost())
 	assert.Error(t, err)
@@ -350,7 +350,7 @@ func TestNewMetricsReceiver_initial_offset_err(t *testing.T) {
 		Encoding:      defaultEncoding,
 	}
 	unmarshaler := defaultMetricsUnmarshalers()[c.Encoding]
-	r, err := newMetricsReceiver(c, receivertest.NewNopCreateSettings(), unmarshaler, consumertest.NewNop())
+	r, err := newMetricsReceiver(c, receivertest.NewNopCreateSettings(), unmarshaler, nil, consumertest.NewNop())
 	require.NoError(t, err)
 	err = r.Start(context.Background(), componenttest.NewNopHost())
 	require.Error(t, err)
@@ -559,7 +559,7 @@ func TestNewLogsReceiver_version_err(t *testing.T) {
 		ProtocolVersion: "none",
 	}
 	unmarshaler := defaultLogsUnmarshalers("Test Version", zap.NewNop())[c.Encoding]
-	r, err := newLogsReceiver(c, receivertest.NewNopCreateSettings(), unmarshaler, consumertest.NewNop())
+	r, err := newLogsReceiver(c, receivertest.NewNopCreateSettings(), unmarshaler, nil, consumertest.NewNop())
 	require.NoError(t, err)
 	err = r.Start(context.Background(), componenttest.NewNopHost())
 	assert.Error(t, err)
@@ -570,7 +570,7 @@ func TestNewLogsReceiver_encoding_err(t *testing.T) {
 		Encoding: "foo",
 	}
 	unmarshaler := defaultLogsUnmarshalers("Test Version", zap.NewNop())[c.Encoding]
-	r, err := newLogsReceiver(c, receivertest.NewNopCreateSettings(), unmarshaler, consumertest.NewNop())
+	r, err := newLogsReceiver(c, receivertest.NewNopCreateSettings(), unmarshaler, nil, consumertest.NewNop())
 	require.Error(t, err)
 	assert.Nil(t, r)
 	assert.EqualError(t, err, errUnrecognizedEncoding.Error())
@@ -592,7 +592,7 @@ func TestNewLogsExporter_err_auth_type(t *testing.T) {
 		},
 	}
 	unmarshaler := defaultLogsUnmarshalers("Test Version", zap.NewNop())[c.Encoding]
-	r, err := newLogsReceiver(c, receivertest.NewNopCreateSettings(), unmarshaler, consumertest.NewNop())
+	r, err := newLogsReceiver(c, receivertest.NewNopCreateSettings(), unmarshaler, nil, consumertest.NewNop())
 	require.NoError(t, err)
 	err = r.Start(context.Background(), componenttest.NewNopHost())
 	assert.Error(t, err)
@@ -605,7 +605,7 @@ func TestNewLogsReceiver_initial_offset_err(t *testing.T) {
 		Encoding:      defaultEncoding,
 	}
 	unmarshaler := defaultLogsUnmarshalers("Test Version", zap.NewNop())[c.Encoding]
-	r, err := newLogsReceiver(c, receivertest.NewNopCreateSettings(), unmarshaler, consumertest.NewNop())
+	r, err := newLogsReceiver(c, receivertest.NewNopCreateSettings(), unmarshaler, nil, consumertest.NewNop())
 	require.NoError(t, err)
 	err = r.Start(context.Background(), componenttest.NewNopHost())
 	require.Error(t, err)
@@ -936,7 +936,7 @@ func TestCreateLogsReceiver_encoding_text_error(t *testing.T) {
 		Encoding: "text_uft-8",
 	}
 	unmarshaler := defaultLogsUnmarshalers("Test Version", zap.NewNop())[cfg.Encoding]
-	_, err := newLogsReceiver(cfg, receivertest.NewNopCreateSettings(), unmarshaler, consumertest.NewNop())
+	_, err := newLogsReceiver(cfg, receivertest.NewNopCreateSettings(), unmarshaler, nil, consumertest.NewNop())
 	// encoding error comes first
 	assert.Error(t, err, "unsupported encoding")
 }

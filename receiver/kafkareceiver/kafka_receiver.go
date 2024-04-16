@@ -29,10 +29,8 @@ var errInvalidInitialOffset = fmt.Errorf("invalid initial offset")
 
 type HandlerHook interface {
 	sarama.ConsumerGroupHandler
-	BeforeStart(context.Context, component.Host) error
-	AfterStart(context.Context, component.Host) error
-	BeforeShutdown(context.Context) error
-	AfterShutdown(context.Context) error
+	Start(context.Context, component.Host) error
+	Shutdown(context.Context) error
 }
 
 // KafkaTracesConsumer uses sarama to consume and handle messages from kafka.
@@ -143,12 +141,6 @@ func createKafkaClient(config Config) (sarama.ConsumerGroup, error) {
 
 func (c *KafkaTracesConsumer) Start(_ context.Context, host component.Host) error {
 	ctx, cancel := context.WithCancel(context.Background())
-	if c.delegate != nil {
-		if err := c.delegate.BeforeStart(ctx, host); err != nil {
-			cancel()
-			return err
-		}
-	}
 	c.cancelConsumeLoop = cancel
 	obsrecv, err := receiverhelper.NewObsReport(receiverhelper.ObsReportSettings{
 		ReceiverID:             c.settings.ID,
@@ -190,7 +182,7 @@ func (c *KafkaTracesConsumer) Start(_ context.Context, host component.Host) erro
 	}()
 	<-consumerGroup.ready
 	if c.delegate != nil {
-		return c.delegate.AfterStart(ctx, host)
+		return c.delegate.Start(ctx, host)
 	}
 	return nil
 }
@@ -213,10 +205,7 @@ func (c *KafkaTracesConsumer) consumeLoop(ctx context.Context, handler sarama.Co
 
 func (c *KafkaTracesConsumer) Shutdown(ctx context.Context) error {
 	if c.delegate != nil {
-		_ = c.delegate.BeforeShutdown(ctx)
-		defer func(delegate HandlerHook, ctx context.Context) {
-			_ = delegate.AfterShutdown(ctx)
-		}(c.delegate, ctx)
+		_ = c.delegate.Shutdown(ctx)
 	}
 	if c.cancelConsumeLoop == nil {
 		return nil

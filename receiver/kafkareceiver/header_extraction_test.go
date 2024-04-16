@@ -27,7 +27,7 @@ func TestHeaderExtractionTraces(t *testing.T) {
 	})
 	require.NoError(t, err)
 	nextConsumer := &consumertest.TracesSink{}
-	c := tracesConsumerGroupHandler{
+	c := TracesConsumerGroupHandler{
 		unmarshaler:  newPdataTracesUnmarshaler(&ptrace.ProtoUnmarshaler{}, defaultEncoding),
 		logger:       zaptest.NewLogger(t),
 		ready:        make(chan bool),
@@ -91,7 +91,7 @@ func TestHeaderExtractionLogs(t *testing.T) {
 	nextConsumer := &consumertest.LogsSink{}
 	unmarshaler := newTextLogsUnmarshaler()
 	unmarshaler, err = unmarshaler.WithEnc("utf-8")
-	c := logsConsumerGroupHandler{
+	c := LogsConsumerGroupHandler{
 		unmarshaler:  unmarshaler,
 		logger:       zaptest.NewLogger(t),
 		ready:        make(chan bool),
@@ -148,7 +148,7 @@ func TestHeaderExtractionMetrics(t *testing.T) {
 	})
 	require.NoError(t, err)
 	nextConsumer := &consumertest.MetricsSink{}
-	c := metricsConsumerGroupHandler{
+	c := MetricsConsumerGroupHandler{
 		unmarshaler:  newPdataMetricsUnmarshaler(&pmetric.ProtoUnmarshaler{}, defaultEncoding),
 		logger:       zaptest.NewLogger(t),
 		ready:        make(chan bool),

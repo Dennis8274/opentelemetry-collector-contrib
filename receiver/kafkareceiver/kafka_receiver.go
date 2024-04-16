@@ -27,8 +27,29 @@ const (
 
 var errInvalidInitialOffset = fmt.Errorf("invalid initial offset")
 
-// kafkaTracesConsumer uses sarama to consume and handle messages from kafka.
-type kafkaTracesConsumer struct {
+type HandlerHook interface {
+	BeforeConsumeClaim(session sarama.ConsumerGroupSession, claim sarama.ConsumerGroupClaim) error
+	MarkMessage(session sarama.ConsumerGroupSession, message *sarama.ConsumerMessage, metadata string)
+	Commit(session sarama.ConsumerGroupSession)
+}
+
+type nopHandlerHook struct {
+}
+
+func (n *nopHandlerHook) BeforeConsumeClaim(_ sarama.ConsumerGroupSession, _ sarama.ConsumerGroupClaim) error {
+	return nil
+}
+
+func (n *nopHandlerHook) MarkMessage(session sarama.ConsumerGroupSession, message *sarama.ConsumerMessage, metadata string) {
+	session.MarkMessage(message, metadata)
+}
+
+func (n *nopHandlerHook) Commit(session sarama.ConsumerGroupSession) {
+	session.Commit()
+}
+
+// KafkaTracesConsumer uses sarama to consume and handle messages from kafka.
+type KafkaTracesConsumer struct {
 	config            Config
 	consumerGroup     sarama.ConsumerGroup
 	nextConsumer      consumer.Traces
@@ -42,10 +63,12 @@ type kafkaTracesConsumer struct {
 	messageMarking    MessageMarking
 	headerExtraction  bool
 	headers           []string
+
+	hook HandlerHook
 }
 
-// kafkaMetricsConsumer uses sarama to consume and handle messages from kafka.
-type kafkaMetricsConsumer struct {
+// KafkaMetricsConsumer uses sarama to consume and handle messages from kafka.
+type KafkaMetricsConsumer struct {
 	config            Config
 	consumerGroup     sarama.ConsumerGroup
 	nextConsumer      consumer.Metrics
@@ -59,10 +82,12 @@ type kafkaMetricsConsumer struct {
 	messageMarking    MessageMarking
 	headerExtraction  bool
 	headers           []string
+
+	hook HandlerHook
 }
 
-// kafkaLogsConsumer uses sarama to consume and handle messages from kafka.
-type kafkaLogsConsumer struct {
+// KafkaLogsConsumer uses sarama to consume and handle messages from kafka.
+type KafkaLogsConsumer struct {
 	config            Config
 	consumerGroup     sarama.ConsumerGroup
 	nextConsumer      consumer.Logs
@@ -76,18 +101,20 @@ type kafkaLogsConsumer struct {
 	messageMarking    MessageMarking
 	headerExtraction  bool
 	headers           []string
+
+	hook HandlerHook
 }
 
-var _ receiver.Traces = (*kafkaTracesConsumer)(nil)
-var _ receiver.Metrics = (*kafkaMetricsConsumer)(nil)
-var _ receiver.Logs = (*kafkaLogsConsumer)(nil)
+var _ receiver.Traces = (*KafkaTracesConsumer)(nil)
+var _ receiver.Metrics = (*KafkaMetricsConsumer)(nil)
+var _ receiver.Logs = (*KafkaLogsConsumer)(nil)
 
-func newTracesReceiver(config Config, set receiver.CreateSettings, unmarshaler TracesUnmarshaler, nextConsumer consumer.Traces) (*kafkaTracesConsumer, error) {
+func newTracesReceiver(config Config, set receiver.CreateSettings, unmarshaler TracesUnmarshaler, hook HandlerHook, nextConsumer consumer.Traces) (*KafkaTracesConsumer, error) {
 	if unmarshaler == nil {
 		return nil, errUnrecognizedEncoding
 	}
 
-	return &kafkaTracesConsumer{
+	return &KafkaTracesConsumer{
 		config:            config,
 		topics:            []string{config.Topic},
 		nextConsumer:      nextConsumer,
@@ -97,6 +124,7 @@ func newTracesReceiver(config Config, set receiver.CreateSettings, unmarshaler T
 		messageMarking:    config.MessageMarking,
 		headerExtraction:  config.HeaderExtraction.ExtractHeaders,
 		headers:           config.HeaderExtraction.Headers,
+		hook:              hook,
 	}, nil
 }
 
@@ -126,7 +154,7 @@ func createKafkaClient(config Config) (sarama.ConsumerGroup, error) {
 	return sarama.NewConsumerGroup(config.Brokers, config.GroupID, saramaConfig)
 }
 
-func (c *kafkaTracesConsumer) Start(_ context.Context, _ component.Host) error {
+func (c *KafkaTracesConsumer) Start(_ context.Context, _ component.Host) error {
 	ctx, cancel := context.WithCancel(context.Background())
 	c.cancelConsumeLoop = cancel
 	obsrecv, err := receiverhelper.NewObsReport(receiverhelper.ObsReportSettings{
@@ -143,7 +171,11 @@ func (c *kafkaTracesConsumer) Start(_ context.Context, _ component.Host) error {
 			return err
 		}
 	}
-	consumerGroup := &tracesConsumerGroupHandler{
+
+	if c.hook == nil {
+		c.hook = &nopHandlerHook{}
+	}
+	consumerGroup := &TracesConsumerGroupHandler{
 		logger:            c.settings.Logger,
 		unmarshaler:       c.unmarshaler,
 		nextConsumer:      c.nextConsumer,
@@ -152,7 +184,9 @@ func (c *kafkaTracesConsumer) Start(_ context.Context, _ component.Host) error {
 		autocommitEnabled: c.autocommitEnabled,
 		messageMarking:    c.messageMarking,
 		headerExtractor:   &nopHeaderExtractor{},
+		hook:              c.hook,
 	}
+
 	if c.headerExtraction {
 		consumerGroup.headerExtractor = &headerExtractor{
 			logger:  c.settings.Logger,
@@ -168,7 +202,7 @@ func (c *kafkaTracesConsumer) Start(_ context.Context, _ component.Host) error {
 	return nil
 }
 
-func (c *kafkaTracesConsumer) consumeLoop(ctx context.Context, handler sarama.ConsumerGroupHandler) error {
+func (c *KafkaTracesConsumer) consumeLoop(ctx context.Context, handler sarama.ConsumerGroupHandler) error {
 	for {
 		// `Consume` should be called inside an infinite loop, when a
 		// server-side rebalance happens, the consumer session will need to be
@@ -184,7 +218,7 @@ func (c *kafkaTracesConsumer) consumeLoop(ctx context.Context, handler sarama.Co
 	}
 }
 
-func (c *kafkaTracesConsumer) Shutdown(context.Context) error {
+func (c *KafkaTracesConsumer) Shutdown(context.Context) error {
 	if c.cancelConsumeLoop == nil {
 		return nil
 	}
@@ -195,12 +229,12 @@ func (c *kafkaTracesConsumer) Shutdown(context.Context) error {
 	return c.consumerGroup.Close()
 }
 
-func newMetricsReceiver(config Config, set receiver.CreateSettings, unmarshaler MetricsUnmarshaler, nextConsumer consumer.Metrics) (*kafkaMetricsConsumer, error) {
+func newMetricsReceiver(config Config, set receiver.CreateSettings, unmarshaler MetricsUnmarshaler, hook HandlerHook, nextConsumer consumer.Metrics) (*KafkaMetricsConsumer, error) {
 	if unmarshaler == nil {
 		return nil, errUnrecognizedEncoding
 	}
 
-	return &kafkaMetricsConsumer{
+	return &KafkaMetricsConsumer{
 		config:            config,
 		topics:            []string{config.Topic},
 		nextConsumer:      nextConsumer,
@@ -210,10 +244,11 @@ func newMetricsReceiver(config Config, set receiver.CreateSettings, unmarshaler 
 		messageMarking:    config.MessageMarking,
 		headerExtraction:  config.HeaderExtraction.ExtractHeaders,
 		headers:           config.HeaderExtraction.Headers,
+		hook:              hook,
 	}, nil
 }
 
-func (c *kafkaMetricsConsumer) Start(_ context.Context, _ component.Host) error {
+func (c *KafkaMetricsConsumer) Start(_ context.Context, _ component.Host) error {
 	ctx, cancel := context.WithCancel(context.Background())
 	c.cancelConsumeLoop = cancel
 	obsrecv, err := receiverhelper.NewObsReport(receiverhelper.ObsReportSettings{
@@ -230,7 +265,10 @@ func (c *kafkaMetricsConsumer) Start(_ context.Context, _ component.Host) error 
 			return err
 		}
 	}
-	metricsConsumerGroup := &metricsConsumerGroupHandler{
+	if c.hook == nil {
+		c.hook = &nopHandlerHook{}
+	}
+	metricsConsumerGroup := &MetricsConsumerGroupHandler{
 		logger:            c.settings.Logger,
 		unmarshaler:       c.unmarshaler,
 		nextConsumer:      c.nextConsumer,
@@ -240,6 +278,7 @@ func (c *kafkaMetricsConsumer) Start(_ context.Context, _ component.Host) error 
 		messageMarking:    c.messageMarking,
 		headerExtractor:   &nopHeaderExtractor{},
 	}
+
 	if c.headerExtraction {
 		metricsConsumerGroup.headerExtractor = &headerExtractor{
 			logger:  c.settings.Logger,
@@ -255,7 +294,7 @@ func (c *kafkaMetricsConsumer) Start(_ context.Context, _ component.Host) error 
 	return nil
 }
 
-func (c *kafkaMetricsConsumer) consumeLoop(ctx context.Context, handler sarama.ConsumerGroupHandler) error {
+func (c *KafkaMetricsConsumer) consumeLoop(ctx context.Context, handler sarama.ConsumerGroupHandler) error {
 	for {
 		// `Consume` should be called inside an infinite loop, when a
 		// server-side rebalance happens, the consumer session will need to be
@@ -271,7 +310,7 @@ func (c *kafkaMetricsConsumer) consumeLoop(ctx context.Context, handler sarama.C
 	}
 }
 
-func (c *kafkaMetricsConsumer) Shutdown(context.Context) error {
+func (c *KafkaMetricsConsumer) Shutdown(context.Context) error {
 	if c.cancelConsumeLoop == nil {
 		return nil
 	}
@@ -282,12 +321,12 @@ func (c *kafkaMetricsConsumer) Shutdown(context.Context) error {
 	return c.consumerGroup.Close()
 }
 
-func newLogsReceiver(config Config, set receiver.CreateSettings, unmarshaler LogsUnmarshaler, nextConsumer consumer.Logs) (*kafkaLogsConsumer, error) {
+func newLogsReceiver(config Config, set receiver.CreateSettings, unmarshaler LogsUnmarshaler, hook HandlerHook, nextConsumer consumer.Logs) (*KafkaLogsConsumer, error) {
 	if unmarshaler == nil {
 		return nil, errUnrecognizedEncoding
 	}
 
-	return &kafkaLogsConsumer{
+	return &KafkaLogsConsumer{
 		config:            config,
 		topics:            []string{config.Topic},
 		nextConsumer:      nextConsumer,
@@ -297,10 +336,11 @@ func newLogsReceiver(config Config, set receiver.CreateSettings, unmarshaler Log
 		messageMarking:    config.MessageMarking,
 		headerExtraction:  config.HeaderExtraction.ExtractHeaders,
 		headers:           config.HeaderExtraction.Headers,
+		hook:              hook,
 	}, nil
 }
 
-func (c *kafkaLogsConsumer) Start(_ context.Context, _ component.Host) error {
+func (c *KafkaLogsConsumer) Start(_ context.Context, _ component.Host) error {
 	ctx, cancel := context.WithCancel(context.Background())
 	c.cancelConsumeLoop = cancel
 	obsrecv, err := receiverhelper.NewObsReport(receiverhelper.ObsReportSettings{
@@ -317,7 +357,10 @@ func (c *kafkaLogsConsumer) Start(_ context.Context, _ component.Host) error {
 			return err
 		}
 	}
-	logsConsumerGroup := &logsConsumerGroupHandler{
+	if c.hook == nil {
+		c.hook = &nopHandlerHook{}
+	}
+	logsConsumerGroup := &LogsConsumerGroupHandler{
 		logger:            c.settings.Logger,
 		unmarshaler:       c.unmarshaler,
 		nextConsumer:      c.nextConsumer,
@@ -327,6 +370,7 @@ func (c *kafkaLogsConsumer) Start(_ context.Context, _ component.Host) error {
 		messageMarking:    c.messageMarking,
 		headerExtractor:   &nopHeaderExtractor{},
 	}
+
 	if c.headerExtraction {
 		logsConsumerGroup.headerExtractor = &headerExtractor{
 			logger:  c.settings.Logger,
@@ -342,7 +386,7 @@ func (c *kafkaLogsConsumer) Start(_ context.Context, _ component.Host) error {
 	return nil
 }
 
-func (c *kafkaLogsConsumer) consumeLoop(ctx context.Context, handler sarama.ConsumerGroupHandler) error {
+func (c *KafkaLogsConsumer) consumeLoop(ctx context.Context, handler sarama.ConsumerGroupHandler) error {
 	for {
 		// `Consume` should be called inside an infinite loop, when a
 		// server-side rebalance happens, the consumer session will need to be
@@ -358,7 +402,7 @@ func (c *kafkaLogsConsumer) consumeLoop(ctx context.Context, handler sarama.Cons
 	}
 }
 
-func (c *kafkaLogsConsumer) Shutdown(context.Context) error {
+func (c *KafkaLogsConsumer) Shutdown(context.Context) error {
 	if c.cancelConsumeLoop == nil {
 		return nil
 	}
@@ -369,7 +413,7 @@ func (c *kafkaLogsConsumer) Shutdown(context.Context) error {
 	return c.consumerGroup.Close()
 }
 
-type tracesConsumerGroupHandler struct {
+type TracesConsumerGroupHandler struct {
 	id           component.ID
 	unmarshaler  TracesUnmarshaler
 	nextConsumer consumer.Traces
@@ -383,9 +427,10 @@ type tracesConsumerGroupHandler struct {
 	autocommitEnabled bool
 	messageMarking    MessageMarking
 	headerExtractor   HeaderExtractor
+	hook              HandlerHook
 }
 
-type metricsConsumerGroupHandler struct {
+type MetricsConsumerGroupHandler struct {
 	id           component.ID
 	unmarshaler  MetricsUnmarshaler
 	nextConsumer consumer.Metrics
@@ -399,9 +444,10 @@ type metricsConsumerGroupHandler struct {
 	autocommitEnabled bool
 	messageMarking    MessageMarking
 	headerExtractor   HeaderExtractor
+	hook              HandlerHook
 }
 
-type logsConsumerGroupHandler struct {
+type LogsConsumerGroupHandler struct {
 	id           component.ID
 	unmarshaler  LogsUnmarshaler
 	nextConsumer consumer.Logs
@@ -415,13 +461,14 @@ type logsConsumerGroupHandler struct {
 	autocommitEnabled bool
 	messageMarking    MessageMarking
 	headerExtractor   HeaderExtractor
+	hook              HandlerHook
 }
 
-var _ sarama.ConsumerGroupHandler = (*tracesConsumerGroupHandler)(nil)
-var _ sarama.ConsumerGroupHandler = (*metricsConsumerGroupHandler)(nil)
-var _ sarama.ConsumerGroupHandler = (*logsConsumerGroupHandler)(nil)
+var _ sarama.ConsumerGroupHandler = (*TracesConsumerGroupHandler)(nil)
+var _ sarama.ConsumerGroupHandler = (*MetricsConsumerGroupHandler)(nil)
+var _ sarama.ConsumerGroupHandler = (*LogsConsumerGroupHandler)(nil)
 
-func (c *tracesConsumerGroupHandler) Setup(session sarama.ConsumerGroupSession) error {
+func (c *TracesConsumerGroupHandler) Setup(session sarama.ConsumerGroupSession) error {
 	c.readyCloser.Do(func() {
 		close(c.ready)
 	})
@@ -430,16 +477,28 @@ func (c *tracesConsumerGroupHandler) Setup(session sarama.ConsumerGroupSession) 
 	return nil
 }
 
-func (c *tracesConsumerGroupHandler) Cleanup(session sarama.ConsumerGroupSession) error {
+func (c *TracesConsumerGroupHandler) Cleanup(session sarama.ConsumerGroupSession) error {
 	statsTags := []tag.Mutator{tag.Upsert(tagInstanceName, c.id.Name())}
 	_ = stats.RecordWithTags(session.Context(), statsTags, statPartitionClose.M(1))
 	return nil
 }
 
-func (c *tracesConsumerGroupHandler) ConsumeClaim(session sarama.ConsumerGroupSession, claim sarama.ConsumerGroupClaim) error {
+func (c *TracesConsumerGroupHandler) ConsumeClaim(session sarama.ConsumerGroupSession, claim sarama.ConsumerGroupClaim) error {
 	c.logger.Info("Starting consumer group", zap.Int32("partition", claim.Partition()))
+	if err := c.hook.BeforeConsumeClaim(session, claim); err != nil {
+		return err
+	}
+
+	commit := func(hook HandlerHook, session sarama.ConsumerGroupSession) {
+		hook.Commit(session)
+	}
+
+	markMessage := func(hook HandlerHook, session sarama.ConsumerGroupSession, message *sarama.ConsumerMessage, metadata string) {
+		hook.MarkMessage(session, message, metadata)
+	}
+
 	if !c.autocommitEnabled {
-		defer session.Commit()
+		defer commit(c.hook, session)
 	}
 	for {
 		select {
@@ -452,7 +511,7 @@ func (c *tracesConsumerGroupHandler) ConsumeClaim(session sarama.ConsumerGroupSe
 				zap.Time("timestamp", message.Timestamp),
 				zap.String("topic", message.Topic))
 			if !c.messageMarking.After {
-				session.MarkMessage(message, "")
+				markMessage(c.hook, session, message, "")
 			}
 
 			ctx := c.obsrecv.StartTracesOp(session.Context())
@@ -473,7 +532,7 @@ func (c *tracesConsumerGroupHandler) ConsumeClaim(session sarama.ConsumerGroupSe
 					[]tag.Mutator{tag.Upsert(tagInstanceName, c.id.String())},
 					statUnmarshalFailedSpans.M(1))
 				if c.messageMarking.After && c.messageMarking.OnError {
-					session.MarkMessage(message, "")
+					markMessage(c.hook, session, message, "")
 				}
 				return err
 			}
@@ -484,15 +543,15 @@ func (c *tracesConsumerGroupHandler) ConsumeClaim(session sarama.ConsumerGroupSe
 			c.obsrecv.EndTracesOp(ctx, c.unmarshaler.Encoding(), spanCount, err)
 			if err != nil {
 				if c.messageMarking.After && c.messageMarking.OnError {
-					session.MarkMessage(message, "")
+					markMessage(c.hook, session, message, "")
 				}
 				return err
 			}
 			if c.messageMarking.After {
-				session.MarkMessage(message, "")
+				markMessage(c.hook, session, message, "")
 			}
 			if !c.autocommitEnabled {
-				session.Commit()
+				commit(c.hook, session)
 			}
 
 		// Should return when `session.Context()` is done.
@@ -504,7 +563,7 @@ func (c *tracesConsumerGroupHandler) ConsumeClaim(session sarama.ConsumerGroupSe
 	}
 }
 
-func (c *metricsConsumerGroupHandler) Setup(session sarama.ConsumerGroupSession) error {
+func (c *MetricsConsumerGroupHandler) Setup(session sarama.ConsumerGroupSession) error {
 	c.readyCloser.Do(func() {
 		close(c.ready)
 	})
@@ -513,13 +572,13 @@ func (c *metricsConsumerGroupHandler) Setup(session sarama.ConsumerGroupSession)
 	return nil
 }
 
-func (c *metricsConsumerGroupHandler) Cleanup(session sarama.ConsumerGroupSession) error {
+func (c *MetricsConsumerGroupHandler) Cleanup(session sarama.ConsumerGroupSession) error {
 	statsTags := []tag.Mutator{tag.Upsert(tagInstanceName, c.id.Name())}
 	_ = stats.RecordWithTags(session.Context(), statsTags, statPartitionClose.M(1))
 	return nil
 }
 
-func (c *metricsConsumerGroupHandler) ConsumeClaim(session sarama.ConsumerGroupSession, claim sarama.ConsumerGroupClaim) error {
+func (c *MetricsConsumerGroupHandler) ConsumeClaim(session sarama.ConsumerGroupSession, claim sarama.ConsumerGroupClaim) error {
 	c.logger.Info("Starting consumer group", zap.Int32("partition", claim.Partition()))
 	if !c.autocommitEnabled {
 		defer session.Commit()
@@ -587,7 +646,7 @@ func (c *metricsConsumerGroupHandler) ConsumeClaim(session sarama.ConsumerGroupS
 	}
 }
 
-func (c *logsConsumerGroupHandler) Setup(session sarama.ConsumerGroupSession) error {
+func (c *LogsConsumerGroupHandler) Setup(session sarama.ConsumerGroupSession) error {
 	c.readyCloser.Do(func() {
 		close(c.ready)
 	})
@@ -598,7 +657,7 @@ func (c *logsConsumerGroupHandler) Setup(session sarama.ConsumerGroupSession) er
 	return nil
 }
 
-func (c *logsConsumerGroupHandler) Cleanup(session sarama.ConsumerGroupSession) error {
+func (c *LogsConsumerGroupHandler) Cleanup(session sarama.ConsumerGroupSession) error {
 	_ = stats.RecordWithTags(
 		session.Context(),
 		[]tag.Mutator{tag.Upsert(tagInstanceName, c.id.String())},
@@ -606,7 +665,7 @@ func (c *logsConsumerGroupHandler) Cleanup(session sarama.ConsumerGroupSession) 
 	return nil
 }
 
-func (c *logsConsumerGroupHandler) ConsumeClaim(session sarama.ConsumerGroupSession, claim sarama.ConsumerGroupClaim) error {
+func (c *LogsConsumerGroupHandler) ConsumeClaim(session sarama.ConsumerGroupSession, claim sarama.ConsumerGroupClaim) error {
 	c.logger.Info("Starting consumer group", zap.Int32("partition", claim.Partition()))
 	if !c.autocommitEnabled {
 		defer session.Commit()

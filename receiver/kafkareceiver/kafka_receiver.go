@@ -28,24 +28,7 @@ const (
 var errInvalidInitialOffset = fmt.Errorf("invalid initial offset")
 
 type HandlerHook interface {
-	BeforeConsumeClaim(session sarama.ConsumerGroupSession, claim sarama.ConsumerGroupClaim) error
-	MarkMessage(session sarama.ConsumerGroupSession, message *sarama.ConsumerMessage, metadata string)
-	Commit(session sarama.ConsumerGroupSession)
-}
-
-type nopHandlerHook struct {
-}
-
-func (n *nopHandlerHook) BeforeConsumeClaim(_ sarama.ConsumerGroupSession, _ sarama.ConsumerGroupClaim) error {
-	return nil
-}
-
-func (n *nopHandlerHook) MarkMessage(session sarama.ConsumerGroupSession, message *sarama.ConsumerMessage, metadata string) {
-	session.MarkMessage(message, metadata)
-}
-
-func (n *nopHandlerHook) Commit(session sarama.ConsumerGroupSession) {
-	session.Commit()
+	sarama.ConsumerGroupHandler
 }
 
 // KafkaTracesConsumer uses sarama to consume and handle messages from kafka.
@@ -64,7 +47,7 @@ type KafkaTracesConsumer struct {
 	headerExtraction  bool
 	headers           []string
 
-	hook HandlerHook
+	delegate HandlerHook
 }
 
 // KafkaMetricsConsumer uses sarama to consume and handle messages from kafka.
@@ -83,7 +66,7 @@ type KafkaMetricsConsumer struct {
 	headerExtraction  bool
 	headers           []string
 
-	hook HandlerHook
+	delegate HandlerHook
 }
 
 // KafkaLogsConsumer uses sarama to consume and handle messages from kafka.
@@ -102,7 +85,7 @@ type KafkaLogsConsumer struct {
 	headerExtraction  bool
 	headers           []string
 
-	hook HandlerHook
+	delegate HandlerHook
 }
 
 var _ receiver.Traces = (*KafkaTracesConsumer)(nil)
@@ -124,7 +107,7 @@ func newTracesReceiver(config Config, set receiver.CreateSettings, unmarshaler T
 		messageMarking:    config.MessageMarking,
 		headerExtraction:  config.HeaderExtraction.ExtractHeaders,
 		headers:           config.HeaderExtraction.Headers,
-		hook:              hook,
+		delegate:          hook,
 	}, nil
 }
 
@@ -172,9 +155,6 @@ func (c *KafkaTracesConsumer) Start(_ context.Context, _ component.Host) error {
 		}
 	}
 
-	if c.hook == nil {
-		c.hook = &nopHandlerHook{}
-	}
 	consumerGroup := &TracesConsumerGroupHandler{
 		logger:            c.settings.Logger,
 		unmarshaler:       c.unmarshaler,
@@ -184,7 +164,7 @@ func (c *KafkaTracesConsumer) Start(_ context.Context, _ component.Host) error {
 		autocommitEnabled: c.autocommitEnabled,
 		messageMarking:    c.messageMarking,
 		headerExtractor:   &nopHeaderExtractor{},
-		hook:              c.hook,
+		delegate:          c.delegate,
 	}
 
 	if c.headerExtraction {
@@ -244,7 +224,7 @@ func newMetricsReceiver(config Config, set receiver.CreateSettings, unmarshaler 
 		messageMarking:    config.MessageMarking,
 		headerExtraction:  config.HeaderExtraction.ExtractHeaders,
 		headers:           config.HeaderExtraction.Headers,
-		hook:              hook,
+		delegate:          hook,
 	}, nil
 }
 
@@ -265,9 +245,7 @@ func (c *KafkaMetricsConsumer) Start(_ context.Context, _ component.Host) error 
 			return err
 		}
 	}
-	if c.hook == nil {
-		c.hook = &nopHandlerHook{}
-	}
+
 	metricsConsumerGroup := &MetricsConsumerGroupHandler{
 		logger:            c.settings.Logger,
 		unmarshaler:       c.unmarshaler,
@@ -277,7 +255,7 @@ func (c *KafkaMetricsConsumer) Start(_ context.Context, _ component.Host) error 
 		autocommitEnabled: c.autocommitEnabled,
 		messageMarking:    c.messageMarking,
 		headerExtractor:   &nopHeaderExtractor{},
-		hook:              c.hook,
+		delegate:          c.delegate,
 	}
 
 	if c.headerExtraction {
@@ -337,7 +315,7 @@ func newLogsReceiver(config Config, set receiver.CreateSettings, unmarshaler Log
 		messageMarking:    config.MessageMarking,
 		headerExtraction:  config.HeaderExtraction.ExtractHeaders,
 		headers:           config.HeaderExtraction.Headers,
-		hook:              hook,
+		delegate:          hook,
 	}, nil
 }
 
@@ -358,9 +336,7 @@ func (c *KafkaLogsConsumer) Start(_ context.Context, _ component.Host) error {
 			return err
 		}
 	}
-	if c.hook == nil {
-		c.hook = &nopHandlerHook{}
-	}
+
 	logsConsumerGroup := &LogsConsumerGroupHandler{
 		logger:            c.settings.Logger,
 		unmarshaler:       c.unmarshaler,
@@ -370,7 +346,7 @@ func (c *KafkaLogsConsumer) Start(_ context.Context, _ component.Host) error {
 		autocommitEnabled: c.autocommitEnabled,
 		messageMarking:    c.messageMarking,
 		headerExtractor:   &nopHeaderExtractor{},
-		hook:              c.hook,
+		delegate:          c.delegate,
 	}
 
 	if c.headerExtraction {
@@ -429,7 +405,7 @@ type TracesConsumerGroupHandler struct {
 	autocommitEnabled bool
 	messageMarking    MessageMarking
 	headerExtractor   HeaderExtractor
-	hook              HandlerHook
+	delegate          HandlerHook
 }
 
 type MetricsConsumerGroupHandler struct {
@@ -446,7 +422,7 @@ type MetricsConsumerGroupHandler struct {
 	autocommitEnabled bool
 	messageMarking    MessageMarking
 	headerExtractor   HeaderExtractor
-	hook              HandlerHook
+	delegate          HandlerHook
 }
 
 type LogsConsumerGroupHandler struct {
@@ -463,7 +439,7 @@ type LogsConsumerGroupHandler struct {
 	autocommitEnabled bool
 	messageMarking    MessageMarking
 	headerExtractor   HeaderExtractor
-	hook              HandlerHook
+	delegate          HandlerHook
 }
 
 var _ sarama.ConsumerGroupHandler = (*TracesConsumerGroupHandler)(nil)
@@ -476,34 +452,30 @@ func (c *TracesConsumerGroupHandler) Setup(session sarama.ConsumerGroupSession) 
 	})
 	statsTags := []tag.Mutator{tag.Upsert(tagInstanceName, c.id.Name())}
 	_ = stats.RecordWithTags(session.Context(), statsTags, statPartitionStart.M(1))
+	if c.delegate != nil {
+		return c.delegate.Setup(session)
+	}
 	return nil
 }
 
 func (c *TracesConsumerGroupHandler) Cleanup(session sarama.ConsumerGroupSession) error {
 	statsTags := []tag.Mutator{tag.Upsert(tagInstanceName, c.id.Name())}
 	_ = stats.RecordWithTags(session.Context(), statsTags, statPartitionClose.M(1))
+	if c.delegate != nil {
+		return c.delegate.Cleanup(session)
+	}
 	return nil
 }
 
 func (c *TracesConsumerGroupHandler) ConsumeClaim(session sarama.ConsumerGroupSession, claim sarama.ConsumerGroupClaim) error {
 	c.logger.Info("Starting consumer group", zap.Int32("partition", claim.Partition()))
-	if c.hook != nil {
-		err := c.hook.BeforeConsumeClaim(session, claim)
-		if err != nil {
+	if c.delegate != nil {
+		if err := c.delegate.ConsumeClaim(session, claim); err != nil {
 			return err
 		}
 	}
-
-	commit := func(hook HandlerHook, session sarama.ConsumerGroupSession) {
-		hook.Commit(session)
-	}
-
-	markMessage := func(hook HandlerHook, session sarama.ConsumerGroupSession, message *sarama.ConsumerMessage, metadata string) {
-		hook.MarkMessage(session, message, metadata)
-	}
-
 	if !c.autocommitEnabled {
-		defer commit(c.hook, session)
+		defer session.Commit()
 	}
 	for {
 		select {
@@ -516,7 +488,7 @@ func (c *TracesConsumerGroupHandler) ConsumeClaim(session sarama.ConsumerGroupSe
 				zap.Time("timestamp", message.Timestamp),
 				zap.String("topic", message.Topic))
 			if !c.messageMarking.After {
-				markMessage(c.hook, session, message, "")
+				session.MarkMessage(message, "")
 			}
 
 			ctx := c.obsrecv.StartTracesOp(session.Context())
@@ -537,7 +509,7 @@ func (c *TracesConsumerGroupHandler) ConsumeClaim(session sarama.ConsumerGroupSe
 					[]tag.Mutator{tag.Upsert(tagInstanceName, c.id.String())},
 					statUnmarshalFailedSpans.M(1))
 				if c.messageMarking.After && c.messageMarking.OnError {
-					markMessage(c.hook, session, message, "")
+					session.MarkMessage(message, "")
 				}
 				return err
 			}
@@ -548,15 +520,15 @@ func (c *TracesConsumerGroupHandler) ConsumeClaim(session sarama.ConsumerGroupSe
 			c.obsrecv.EndTracesOp(ctx, c.unmarshaler.Encoding(), spanCount, err)
 			if err != nil {
 				if c.messageMarking.After && c.messageMarking.OnError {
-					markMessage(c.hook, session, message, "")
+					session.MarkMessage(message, "")
 				}
 				return err
 			}
 			if c.messageMarking.After {
-				markMessage(c.hook, session, message, "")
+				session.MarkMessage(message, "")
 			}
 			if !c.autocommitEnabled {
-				commit(c.hook, session)
+				session.Commit()
 			}
 
 		// Should return when `session.Context()` is done.
@@ -574,17 +546,28 @@ func (c *MetricsConsumerGroupHandler) Setup(session sarama.ConsumerGroupSession)
 	})
 	statsTags := []tag.Mutator{tag.Upsert(tagInstanceName, c.id.Name())}
 	_ = stats.RecordWithTags(session.Context(), statsTags, statPartitionStart.M(1))
+	if c.delegate != nil {
+		return c.delegate.Setup(session)
+	}
 	return nil
 }
 
 func (c *MetricsConsumerGroupHandler) Cleanup(session sarama.ConsumerGroupSession) error {
 	statsTags := []tag.Mutator{tag.Upsert(tagInstanceName, c.id.Name())}
 	_ = stats.RecordWithTags(session.Context(), statsTags, statPartitionClose.M(1))
+	if c.delegate != nil {
+		return c.delegate.Cleanup(session)
+	}
 	return nil
 }
 
 func (c *MetricsConsumerGroupHandler) ConsumeClaim(session sarama.ConsumerGroupSession, claim sarama.ConsumerGroupClaim) error {
 	c.logger.Info("Starting consumer group", zap.Int32("partition", claim.Partition()))
+	if c.delegate != nil {
+		if err := c.delegate.ConsumeClaim(session, claim); err != nil {
+			return err
+		}
+	}
 	if !c.autocommitEnabled {
 		defer session.Commit()
 	}
@@ -659,6 +642,9 @@ func (c *LogsConsumerGroupHandler) Setup(session sarama.ConsumerGroupSession) er
 		session.Context(),
 		[]tag.Mutator{tag.Upsert(tagInstanceName, c.id.String())},
 		statPartitionStart.M(1))
+	if c.delegate != nil {
+		return c.delegate.Setup(session)
+	}
 	return nil
 }
 
@@ -667,11 +653,19 @@ func (c *LogsConsumerGroupHandler) Cleanup(session sarama.ConsumerGroupSession) 
 		session.Context(),
 		[]tag.Mutator{tag.Upsert(tagInstanceName, c.id.String())},
 		statPartitionClose.M(1))
+	if c.delegate != nil {
+		return c.delegate.Cleanup(session)
+	}
 	return nil
 }
 
 func (c *LogsConsumerGroupHandler) ConsumeClaim(session sarama.ConsumerGroupSession, claim sarama.ConsumerGroupClaim) error {
 	c.logger.Info("Starting consumer group", zap.Int32("partition", claim.Partition()))
+	if c.delegate != nil {
+		if err := c.delegate.ConsumeClaim(session, claim); err != nil {
+			return err
+		}
+	}
 	if !c.autocommitEnabled {
 		defer session.Commit()
 	}

@@ -31,6 +31,7 @@ type HandlerHook interface {
 	sarama.ConsumerGroupHandler
 	Start(context.Context, component.Host) error
 	Shutdown(context.Context) error
+	MarkMessage(session sarama.ConsumerGroupSession, message *sarama.ConsumerMessage, metadata string)
 }
 
 // KafkaTracesConsumer uses sarama to consume and handle messages from kafka.
@@ -141,6 +142,12 @@ func createKafkaClient(config Config) (sarama.ConsumerGroup, error) {
 
 func (c *KafkaTracesConsumer) Start(_ context.Context, host component.Host) error {
 	ctx, cancel := context.WithCancel(context.Background())
+	if c.delegate != nil {
+		if err := c.delegate.Start(ctx, host); err != nil {
+			cancel()
+			return err
+		}
+	}
 	c.cancelConsumeLoop = cancel
 	obsrecv, err := receiverhelper.NewObsReport(receiverhelper.ObsReportSettings{
 		ReceiverID:             c.settings.ID,
@@ -181,9 +188,6 @@ func (c *KafkaTracesConsumer) Start(_ context.Context, host component.Host) erro
 		}
 	}()
 	<-consumerGroup.ready
-	if c.delegate != nil {
-		return c.delegate.Start(ctx, host)
-	}
 	return nil
 }
 
@@ -677,6 +681,14 @@ func (c *LogsConsumerGroupHandler) ConsumeClaim(session sarama.ConsumerGroupSess
 	if !c.autocommitEnabled {
 		defer session.Commit()
 	}
+
+	markMessage := func(session sarama.ConsumerGroupSession, message *sarama.ConsumerMessage, metadata string) {
+		if c.delegate != nil {
+			c.delegate.MarkMessage(session, message, metadata)
+		}
+		session.MarkMessage(message, metadata)
+	}
+
 	for {
 		select {
 		case message, ok := <-claim.Messages():
@@ -688,7 +700,7 @@ func (c *LogsConsumerGroupHandler) ConsumeClaim(session sarama.ConsumerGroupSess
 				zap.Time("timestamp", message.Timestamp),
 				zap.String("topic", message.Topic))
 			if !c.messageMarking.After {
-				session.MarkMessage(message, "")
+				markMessage(session, message, "")
 			}
 
 			ctx := c.obsrecv.StartLogsOp(session.Context())
@@ -711,7 +723,7 @@ func (c *LogsConsumerGroupHandler) ConsumeClaim(session sarama.ConsumerGroupSess
 					[]tag.Mutator{tag.Upsert(tagInstanceName, c.id.String())},
 					statUnmarshalFailedLogRecords.M(1))
 				if c.messageMarking.After && c.messageMarking.OnError {
-					session.MarkMessage(message, "")
+					markMessage(session, message, "")
 				}
 				return err
 			}
@@ -721,12 +733,12 @@ func (c *LogsConsumerGroupHandler) ConsumeClaim(session sarama.ConsumerGroupSess
 			c.obsrecv.EndLogsOp(ctx, c.unmarshaler.Encoding(), logRecordCount, err)
 			if err != nil {
 				if c.messageMarking.After && c.messageMarking.OnError {
-					session.MarkMessage(message, "")
+					markMessage(session, message, "")
 				}
 				return err
 			}
 			if c.messageMarking.After {
-				session.MarkMessage(message, "")
+				markMessage(session, message, "")
 			}
 			if !c.autocommitEnabled {
 				session.Commit()

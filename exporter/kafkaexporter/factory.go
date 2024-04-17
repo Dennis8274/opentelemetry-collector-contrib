@@ -70,6 +70,24 @@ func withLogsMarshalers(logsMarshalers ...LogsMarshaler) FactoryOption {
 	}
 }
 
+func WithTraceProducerHook(hook ProducerHook) FactoryOption {
+	return func(factory *kafkaExporterFactory) {
+		factory.tracesProducerHook = hook
+	}
+}
+
+func WithMetricsProducerHook(hook ProducerHook) FactoryOption {
+	return func(factory *kafkaExporterFactory) {
+		factory.metricsProducerHook = hook
+	}
+}
+
+func WithLogProducerHook(hook ProducerHook) FactoryOption {
+	return func(factory *kafkaExporterFactory) {
+		factory.logProducerHook = hook
+	}
+}
+
 // NewFactory creates Kafka exporter factory.
 func NewFactory(options ...FactoryOption) exporter.Factory {
 	f := &kafkaExporterFactory{

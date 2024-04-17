@@ -27,11 +27,17 @@ const (
 
 var errInvalidInitialOffset = fmt.Errorf("invalid initial offset")
 
+const (
+	kafkaMarkMessageCallback = 1
+)
+
+type markMessageCallback func()
+
 type HandlerHook interface {
 	sarama.ConsumerGroupHandler
 	Start(context.Context, component.Host) error
 	Shutdown(context.Context) error
-	MarkMessage(session sarama.ConsumerGroupSession, message *sarama.ConsumerMessage, metadata string)
+	MarkMessage(message *sarama.ConsumerMessage)
 }
 
 // KafkaTracesConsumer uses sarama to consume and handle messages from kafka.
@@ -490,12 +496,6 @@ func (c *TracesConsumerGroupHandler) ConsumeClaim(session sarama.ConsumerGroupSe
 		defer session.Commit()
 	}
 
-	markMessage := func(session sarama.ConsumerGroupSession, message *sarama.ConsumerMessage, metadata string) {
-		if c.delegate != nil {
-			c.delegate.MarkMessage(session, message, metadata)
-		}
-		session.MarkMessage(message, metadata)
-	}
 	for {
 		select {
 		case message, ok := <-claim.Messages():
@@ -507,7 +507,7 @@ func (c *TracesConsumerGroupHandler) ConsumeClaim(session sarama.ConsumerGroupSe
 				zap.Time("timestamp", message.Timestamp),
 				zap.String("topic", message.Topic))
 			if !c.messageMarking.After {
-				markMessage(session, message, "")
+				session.MarkMessage(message, "")
 			}
 
 			ctx := c.obsrecv.StartTracesOp(session.Context())
@@ -528,23 +528,27 @@ func (c *TracesConsumerGroupHandler) ConsumeClaim(session sarama.ConsumerGroupSe
 					[]tag.Mutator{tag.Upsert(tagInstanceName, c.id.String())},
 					statUnmarshalFailedSpans.M(1))
 				if c.messageMarking.After && c.messageMarking.OnError {
-					markMessage(session, message, "")
+					session.MarkMessage(message, "")
 				}
 				return err
 			}
 
 			c.headerExtractor.extractHeadersTraces(traces, message)
 			spanCount := traces.SpanCount()
-			err = c.nextConsumer.ConsumeTraces(session.Context(), traces)
+			err = c.nextConsumer.ConsumeTraces(context.WithValue(session.Context(), kafkaMarkMessageCallback, markMessageCallback(func() {
+				if c.delegate != nil {
+					c.delegate.MarkMessage(message)
+				}
+			})), traces)
 			c.obsrecv.EndTracesOp(ctx, c.unmarshaler.Encoding(), spanCount, err)
 			if err != nil {
 				if c.messageMarking.After && c.messageMarking.OnError {
-					markMessage(session, message, "")
+					session.MarkMessage(message, "")
 				}
 				return err
 			}
 			if c.messageMarking.After {
-				markMessage(session, message, "")
+				session.MarkMessage(message, "")
 			}
 			if !c.autocommitEnabled {
 				session.Commit()
@@ -590,12 +594,7 @@ func (c *MetricsConsumerGroupHandler) ConsumeClaim(session sarama.ConsumerGroupS
 	if !c.autocommitEnabled {
 		defer session.Commit()
 	}
-	markMessage := func(session sarama.ConsumerGroupSession, message *sarama.ConsumerMessage, metadata string) {
-		if c.delegate != nil {
-			c.delegate.MarkMessage(session, message, metadata)
-		}
-		session.MarkMessage(message, metadata)
-	}
+
 	for {
 		select {
 		case message, ok := <-claim.Messages():
@@ -607,7 +606,7 @@ func (c *MetricsConsumerGroupHandler) ConsumeClaim(session sarama.ConsumerGroupS
 				zap.Time("timestamp", message.Timestamp),
 				zap.String("topic", message.Topic))
 			if !c.messageMarking.After {
-				markMessage(session, message, "")
+				session.MarkMessage(message, "")
 			}
 
 			ctx := c.obsrecv.StartMetricsOp(session.Context())
@@ -628,23 +627,27 @@ func (c *MetricsConsumerGroupHandler) ConsumeClaim(session sarama.ConsumerGroupS
 					[]tag.Mutator{tag.Upsert(tagInstanceName, c.id.String())},
 					statUnmarshalFailedMetricPoints.M(1))
 				if c.messageMarking.After && c.messageMarking.OnError {
-					markMessage(session, message, "")
+					session.MarkMessage(message, "")
 				}
 				return err
 			}
 			c.headerExtractor.extractHeadersMetrics(metrics, message)
 
 			dataPointCount := metrics.DataPointCount()
-			err = c.nextConsumer.ConsumeMetrics(session.Context(), metrics)
+			err = c.nextConsumer.ConsumeMetrics(context.WithValue(session.Context(), kafkaMarkMessageCallback, markMessageCallback(func() {
+				if c.delegate != nil {
+					c.delegate.MarkMessage(message)
+				}
+			})), metrics)
 			c.obsrecv.EndMetricsOp(ctx, c.unmarshaler.Encoding(), dataPointCount, err)
 			if err != nil {
 				if c.messageMarking.After && c.messageMarking.OnError {
-					markMessage(session, message, "")
+					session.MarkMessage(message, "")
 				}
 				return err
 			}
 			if c.messageMarking.After {
-				markMessage(session, message, "")
+				session.MarkMessage(message, "")
 			}
 			if !c.autocommitEnabled {
 				session.Commit()
@@ -695,13 +698,6 @@ func (c *LogsConsumerGroupHandler) ConsumeClaim(session sarama.ConsumerGroupSess
 		defer session.Commit()
 	}
 
-	markMessage := func(session sarama.ConsumerGroupSession, message *sarama.ConsumerMessage, metadata string) {
-		if c.delegate != nil {
-			c.delegate.MarkMessage(session, message, metadata)
-		}
-		session.MarkMessage(message, metadata)
-	}
-
 	for {
 		select {
 		case message, ok := <-claim.Messages():
@@ -713,7 +709,7 @@ func (c *LogsConsumerGroupHandler) ConsumeClaim(session sarama.ConsumerGroupSess
 				zap.Time("timestamp", message.Timestamp),
 				zap.String("topic", message.Topic))
 			if !c.messageMarking.After {
-				markMessage(session, message, "")
+				session.MarkMessage(message, "")
 			}
 
 			ctx := c.obsrecv.StartLogsOp(session.Context())
@@ -736,22 +732,27 @@ func (c *LogsConsumerGroupHandler) ConsumeClaim(session sarama.ConsumerGroupSess
 					[]tag.Mutator{tag.Upsert(tagInstanceName, c.id.String())},
 					statUnmarshalFailedLogRecords.M(1))
 				if c.messageMarking.After && c.messageMarking.OnError {
-					markMessage(session, message, "")
+					session.MarkMessage(message, "")
 				}
 				return err
 			}
 			c.headerExtractor.extractHeadersLogs(logs, message)
 			logRecordCount := logs.LogRecordCount()
-			err = c.nextConsumer.ConsumeLogs(session.Context(), logs)
+			consumeCtx := session.Context()
+			err = c.nextConsumer.ConsumeLogs(context.WithValue(consumeCtx, kafkaMarkMessageCallback, markMessageCallback(func() {
+				if c.delegate != nil {
+					c.delegate.MarkMessage(message)
+				}
+			})), logs)
 			c.obsrecv.EndLogsOp(ctx, c.unmarshaler.Encoding(), logRecordCount, err)
 			if err != nil {
 				if c.messageMarking.After && c.messageMarking.OnError {
-					markMessage(session, message, "")
+					session.MarkMessage(message, "")
 				}
 				return err
 			}
 			if c.messageMarking.After {
-				markMessage(session, message, "")
+				session.MarkMessage(message, "")
 			}
 			if !c.autocommitEnabled {
 				session.Commit()
@@ -764,6 +765,18 @@ func (c *LogsConsumerGroupHandler) ConsumeClaim(session sarama.ConsumerGroupSess
 			return nil
 		}
 	}
+}
+
+func MarkMessage(ctx context.Context) {
+	value := ctx.Value(kafkaMarkMessageCallback)
+	if value == nil {
+		return
+	}
+	callback, ok := value.(markMessageCallback)
+	if !ok {
+		return
+	}
+	callback()
 }
 
 func toSaramaInitialOffset(initialOffset string) (int64, error) {

@@ -70,21 +70,9 @@ func withLogsMarshalers(logsMarshalers ...LogsMarshaler) FactoryOption {
 	}
 }
 
-func WithTraceProducerHook(hook ProducerHook) FactoryOption {
+func WithProducerHook(hook ProducerHook) FactoryOption {
 	return func(factory *kafkaExporterFactory) {
-		factory.tracesProducerHook = hook
-	}
-}
-
-func WithMetricsProducerHook(hook ProducerHook) FactoryOption {
-	return func(factory *kafkaExporterFactory) {
-		factory.metricsProducerHook = hook
-	}
-}
-
-func WithLogProducerHook(hook ProducerHook) FactoryOption {
-	return func(factory *kafkaExporterFactory) {
-		factory.logProducerHook = hook
+		factory.producerHook = hook
 	}
 }
 
@@ -134,12 +122,10 @@ func createDefaultConfig() component.Config {
 }
 
 type kafkaExporterFactory struct {
-	tracesMarshalers    map[string]TracesMarshaler
-	metricsMarshalers   map[string]MetricsMarshaler
-	logsMarshalers      map[string]LogsMarshaler
-	tracesProducerHook  ProducerHook
-	metricsProducerHook ProducerHook
-	logProducerHook     ProducerHook
+	tracesMarshalers  map[string]TracesMarshaler
+	metricsMarshalers map[string]MetricsMarshaler
+	logsMarshalers    map[string]LogsMarshaler
+	producerHook      ProducerHook
 }
 
 func (f *kafkaExporterFactory) createTracesExporter(
@@ -154,7 +140,7 @@ func (f *kafkaExporterFactory) createTracesExporter(
 	if oCfg.Encoding == "otlp_json" {
 		set.Logger.Info("otlp_json is considered experimental and should not be used in a production environment")
 	}
-	exp, err := newTracesExporter(oCfg, set, f.tracesMarshalers, f.tracesProducerHook)
+	exp, err := newTracesExporter(oCfg, set, f.tracesMarshalers, f.producerHook)
 	if err != nil {
 		return nil, err
 	}
@@ -185,7 +171,7 @@ func (f *kafkaExporterFactory) createMetricsExporter(
 	if oCfg.Encoding == "otlp_json" {
 		set.Logger.Info("otlp_json is considered experimental and should not be used in a production environment")
 	}
-	exp, err := newMetricsExporter(oCfg, set, f.metricsMarshalers, f.metricsProducerHook)
+	exp, err := newMetricsExporter(oCfg, set, f.metricsMarshalers, f.producerHook)
 	if err != nil {
 		return nil, err
 	}
@@ -216,7 +202,7 @@ func (f *kafkaExporterFactory) createLogsExporter(
 	if oCfg.Encoding == "otlp_json" {
 		set.Logger.Info("otlp_json is considered experimental and should not be used in a production environment")
 	}
-	exp, err := newLogsExporter(oCfg, set, f.logsMarshalers, f.logProducerHook)
+	exp, err := newLogsExporter(oCfg, set, f.logsMarshalers, f.producerHook)
 	if err != nil {
 		return nil, err
 	}

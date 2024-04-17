@@ -22,6 +22,12 @@ import (
 
 var errUnrecognizedEncoding = fmt.Errorf("unrecognized encoding")
 
+type ProducerHook interface {
+	Pushed(ctx context.Context, messages []*sarama.ProducerMessage) error
+	Started(ctx context.Context, config Config) error
+	Closed(ctx context.Context, config Config) error
+}
+
 // kafkaTracesProducer uses sarama to produce trace messages to Kafka.
 type kafkaTracesProducer struct {
 	cfg       Config
@@ -29,6 +35,7 @@ type kafkaTracesProducer struct {
 	topic     string
 	marshaler TracesMarshaler
 	logger    *zap.Logger
+	hook      ProducerHook
 }
 
 type kafkaErrors struct {
@@ -40,7 +47,7 @@ func (ke kafkaErrors) Error() string {
 	return fmt.Sprintf("Failed to deliver %d messages due to %s", ke.count, ke.err)
 }
 
-func (e *kafkaTracesProducer) tracesPusher(_ context.Context, td ptrace.Traces) error {
+func (e *kafkaTracesProducer) tracesPusher(ctx context.Context, td ptrace.Traces) error {
 	messages, err := e.marshaler.Marshal(td, e.topic)
 	if err != nil {
 		return consumererror.NewPermanent(err)
@@ -55,23 +62,26 @@ func (e *kafkaTracesProducer) tracesPusher(_ context.Context, td ptrace.Traces) 
 		}
 		return err
 	}
-	return nil
+	return e.hook.Pushed(ctx, messages)
 }
 
-func (e *kafkaTracesProducer) Close(context.Context) error {
+func (e *kafkaTracesProducer) Close(ctx context.Context) error {
 	if e.producer == nil {
 		return nil
 	}
+	defer func(hook ProducerHook, ctx context.Context, config Config) {
+		_ = hook.Closed(ctx, config)
+	}(e.hook, ctx, e.cfg)
 	return e.producer.Close()
 }
 
-func (e *kafkaTracesProducer) start(_ context.Context, _ component.Host) error {
+func (e *kafkaTracesProducer) start(ctx context.Context, _ component.Host) error {
 	producer, err := newSaramaProducer(e.cfg)
 	if err != nil {
 		return err
 	}
 	e.producer = producer
-	return nil
+	return e.hook.Started(ctx, e.cfg)
 }
 
 // kafkaMetricsProducer uses sarama to produce metrics messages to kafka
@@ -81,9 +91,10 @@ type kafkaMetricsProducer struct {
 	topic     string
 	marshaler MetricsMarshaler
 	logger    *zap.Logger
+	hook      ProducerHook
 }
 
-func (e *kafkaMetricsProducer) metricsDataPusher(_ context.Context, md pmetric.Metrics) error {
+func (e *kafkaMetricsProducer) metricsDataPusher(ctx context.Context, md pmetric.Metrics) error {
 	messages, err := e.marshaler.Marshal(md, e.topic)
 	if err != nil {
 		return consumererror.NewPermanent(err)
@@ -98,23 +109,26 @@ func (e *kafkaMetricsProducer) metricsDataPusher(_ context.Context, md pmetric.M
 		}
 		return err
 	}
-	return nil
+	return e.hook.Pushed(ctx, messages)
 }
 
-func (e *kafkaMetricsProducer) Close(context.Context) error {
+func (e *kafkaMetricsProducer) Close(ctx context.Context) error {
 	if e.producer == nil {
 		return nil
 	}
+	defer func(hook ProducerHook, ctx context.Context, config Config) {
+		_ = hook.Closed(ctx, config)
+	}(e.hook, ctx, e.cfg)
 	return e.producer.Close()
 }
 
-func (e *kafkaMetricsProducer) start(_ context.Context, _ component.Host) error {
+func (e *kafkaMetricsProducer) start(ctx context.Context, _ component.Host) error {
 	producer, err := newSaramaProducer(e.cfg)
 	if err != nil {
 		return err
 	}
 	e.producer = producer
-	return nil
+	return e.hook.Started(ctx, e.cfg)
 }
 
 // kafkaLogsProducer uses sarama to produce logs messages to kafka
@@ -124,9 +138,10 @@ type kafkaLogsProducer struct {
 	topic     string
 	marshaler LogsMarshaler
 	logger    *zap.Logger
+	hook      ProducerHook
 }
 
-func (e *kafkaLogsProducer) logsDataPusher(_ context.Context, ld plog.Logs) error {
+func (e *kafkaLogsProducer) logsDataPusher(ctx context.Context, ld plog.Logs) error {
 	messages, err := e.marshaler.Marshal(ld, e.topic)
 	if err != nil {
 		return consumererror.NewPermanent(err)
@@ -141,23 +156,26 @@ func (e *kafkaLogsProducer) logsDataPusher(_ context.Context, ld plog.Logs) erro
 		}
 		return err
 	}
-	return nil
+	return e.hook.Pushed(ctx, messages)
 }
 
-func (e *kafkaLogsProducer) Close(context.Context) error {
+func (e *kafkaLogsProducer) Close(ctx context.Context) error {
 	if e.producer == nil {
 		return nil
 	}
+	defer func(hook ProducerHook, ctx context.Context, config Config) {
+		_ = hook.Closed(ctx, config)
+	}(e.hook, ctx, e.cfg)
 	return e.producer.Close()
 }
 
-func (e *kafkaLogsProducer) start(_ context.Context, _ component.Host) error {
+func (e *kafkaLogsProducer) start(ctx context.Context, _ component.Host) error {
 	producer, err := newSaramaProducer(e.cfg)
 	if err != nil {
 		return err
 	}
 	e.producer = producer
-	return nil
+	return e.hook.Started(ctx, e.cfg)
 }
 
 func newSaramaProducer(config Config) (sarama.SyncProducer, error) {
@@ -206,7 +224,7 @@ func newSaramaProducer(config Config) (sarama.SyncProducer, error) {
 	return producer, nil
 }
 
-func newMetricsExporter(config Config, set exporter.CreateSettings, marshalers map[string]MetricsMarshaler) (*kafkaMetricsProducer, error) {
+func newMetricsExporter(config Config, set exporter.CreateSettings, marshalers map[string]MetricsMarshaler, hook ProducerHook) (*kafkaMetricsProducer, error) {
 	marshaler := marshalers[config.Encoding]
 	if marshaler == nil {
 		return nil, errUnrecognizedEncoding
@@ -216,12 +234,13 @@ func newMetricsExporter(config Config, set exporter.CreateSettings, marshalers m
 		topic:     config.Topic,
 		marshaler: marshaler,
 		logger:    set.Logger,
+		hook:      hook,
 	}, nil
 
 }
 
 // newTracesExporter creates Kafka exporter.
-func newTracesExporter(config Config, set exporter.CreateSettings, marshalers map[string]TracesMarshaler) (*kafkaTracesProducer, error) {
+func newTracesExporter(config Config, set exporter.CreateSettings, marshalers map[string]TracesMarshaler, hook ProducerHook) (*kafkaTracesProducer, error) {
 	marshaler := marshalers[config.Encoding]
 	if marshaler == nil {
 		return nil, errUnrecognizedEncoding
@@ -237,10 +256,11 @@ func newTracesExporter(config Config, set exporter.CreateSettings, marshalers ma
 		topic:     config.Topic,
 		marshaler: marshaler,
 		logger:    set.Logger,
+		hook:      hook,
 	}, nil
 }
 
-func newLogsExporter(config Config, set exporter.CreateSettings, marshalers map[string]LogsMarshaler) (*kafkaLogsProducer, error) {
+func newLogsExporter(config Config, set exporter.CreateSettings, marshalers map[string]LogsMarshaler, hook ProducerHook) (*kafkaLogsProducer, error) {
 	marshaler := marshalers[config.Encoding]
 	if marshaler == nil {
 		return nil, errUnrecognizedEncoding
@@ -251,6 +271,7 @@ func newLogsExporter(config Config, set exporter.CreateSettings, marshalers map[
 		topic:     config.Topic,
 		marshaler: marshaler,
 		logger:    set.Logger,
+		hook:      hook,
 	}, nil
 
 }

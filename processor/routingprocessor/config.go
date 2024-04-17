@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/open-telemetry/opentelemetry-collector-contrib/pkg/ottl"
+	"go.opentelemetry.io/collector/component"
 )
 
 var (
@@ -57,6 +58,8 @@ type Config struct {
 	// Table contains the routing table for this processor.
 	// Required.
 	Table []RoutingTableItem `mapstructure:"table"`
+
+	RouteWatcherID *component.ID `mapstructure:"route_watcher"`
 }
 
 // Validate checks if the processor configuration is valid.

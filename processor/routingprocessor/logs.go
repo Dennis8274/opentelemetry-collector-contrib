@@ -5,6 +5,8 @@ package routingprocessor // import "github.com/open-telemetry/opentelemetry-coll
 
 import (
 	"context"
+	"fmt"
+	"sync"
 
 	"go.opentelemetry.io/collector/component"
 	"go.opentelemetry.io/collector/consumer"
@@ -25,6 +27,18 @@ import (
 
 var _ processor.Logs = (*logProcessor)(nil)
 
+type logEntry struct {
+	ctx context.Context
+	l   plog.Logs
+	wg  sync.WaitGroup
+	err error
+}
+
+type routeConf struct {
+	table     []RoutingTableItem
+	available map[component.ID]component.Component
+}
+
 type logProcessor struct {
 	logger *zap.Logger
 	config *Config
@@ -33,6 +47,8 @@ type logProcessor struct {
 	router    router[exporter.Logs, ottllog.TransformContext]
 
 	nonRoutedLogRecordsCounter metric.Int64Counter
+	routeConfCh                chan *routeConf
+	payloadCh                  chan *logEntry
 }
 
 func newLogProcessor(settings component.TelemetrySettings, config component.Config) (*logProcessor, error) {
@@ -63,18 +79,67 @@ func newLogProcessor(settings component.TelemetrySettings, config component.Conf
 		),
 		extractor:                  newExtractor(cfg.FromAttribute, settings.Logger),
 		nonRoutedLogRecordsCounter: nonRoutedLogRecordsCounter,
+		routeConfCh:                make(chan *routeConf, 1),
+		payloadCh:                  make(chan *logEntry),
 	}, nil
 }
 
-func (p *logProcessor) Start(_ context.Context, host component.Host) error {
+func (p *logProcessor) Start(ctx context.Context, host component.Host) error {
 	err := p.router.registerExporters(host.GetExporters()[component.DataTypeLogs]) //nolint:staticcheck
 	if err != nil {
 		return err
 	}
+	watcherExt, ok := host.GetExtensions()[*p.config.RouteWatcherID]
+	if !ok || watcherExt == nil {
+		return fmt.Errorf("unknown route watcher extension with id %s", p.config.RouteWatcherID)
+	}
+	routeConfWatcher, ok := watcherExt.(RouteConfWatcher)
+	if ok {
+		routeConfWatcher.AddRouteConfListener(func(table []RoutingTableItem, available map[component.ID]component.Component) error {
+			p.routeConfCh <- &routeConf{
+				table:     table,
+				available: available,
+			}
+			return nil
+		})
+	}
+	go p.consumeLoop(ctx)
 	return nil
 }
 
 func (p *logProcessor) ConsumeLogs(ctx context.Context, l plog.Logs) error {
+	le := &logEntry{
+		ctx: ctx,
+		l:   l,
+	}
+	le.wg.Add(1)
+	p.payloadCh <- le
+	le.wg.Wait()
+	return le.err
+}
+
+func (p *logProcessor) consumeLoop(ctx context.Context) {
+	for {
+		select {
+		case payload := <-p.payloadCh:
+			func(l *logEntry) {
+				defer l.wg.Done()
+				l.err = p.consumeLogs(l)
+			}(payload)
+		case conf := <-p.routeConfCh:
+			p.router.table = conf.table
+			if err := p.router.registerRouteExporters(conf.available); err != nil {
+				p.logger.Error("failed to register exporters", zap.Error(err))
+			}
+		case <-ctx.Done():
+			return
+		}
+	}
+}
+
+func (p *logProcessor) consumeLogs(le *logEntry) error {
+	ctx := le.ctx
+	l := le.l
 	if p.config.FromAttribute == "" {
 		err := p.route(ctx, l)
 		if err != nil {

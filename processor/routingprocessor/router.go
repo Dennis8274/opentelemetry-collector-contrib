@@ -15,6 +15,12 @@ import (
 
 var errExporterNotFound = errors.New("exporter not found")
 
+type OnRouteConfChanged func(table []RoutingTableItem, available map[component.ID]component.Component) error
+
+type RouteConfWatcher interface {
+	AddRouteConfListener(OnRouteConfChanged)
+}
+
 // router registers exporters and default exporters for an exporter. router can
 // be instantiated with exporter.Traces, exporter.Metrics, and
 // exporter.Logs type arguments.
@@ -90,10 +96,12 @@ func (r *router[E, K]) registerDefaultExporters(available map[component.ID]compo
 // registerRouteExporters registers route exporters using the provided
 // available exporters map to check if they were available.
 func (r *router[E, K]) registerRouteExporters(available map[component.ID]component.Component) error {
+	var regErrs []error
 	for _, item := range r.table {
 		statement, err := r.getStatementFrom(item)
 		if err != nil {
-			return err
+			regErrs = append(regErrs, err)
+			continue
 		}
 
 		route, ok := r.routes[key(item)]
@@ -107,13 +115,14 @@ func (r *router[E, K]) registerRouteExporters(available map[component.ID]compone
 				continue
 			}
 			if err != nil {
-				return err
+				regErrs = append(regErrs, err)
+				continue
 			}
 			route.exporters = append(route.exporters, e)
 		}
 		r.routes[key(item)] = route
 	}
-	return nil
+	return errors.Join(regErrs...)
 }
 
 // getStatementFrom builds a routing OTTL statements from provided

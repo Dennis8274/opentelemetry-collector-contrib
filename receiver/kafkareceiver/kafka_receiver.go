@@ -489,6 +489,13 @@ func (c *TracesConsumerGroupHandler) ConsumeClaim(session sarama.ConsumerGroupSe
 	if !c.autocommitEnabled {
 		defer session.Commit()
 	}
+
+	markMessage := func(session sarama.ConsumerGroupSession, message *sarama.ConsumerMessage, metadata string) {
+		if c.delegate != nil {
+			c.delegate.MarkMessage(session, message, metadata)
+		}
+		session.MarkMessage(message, metadata)
+	}
 	for {
 		select {
 		case message, ok := <-claim.Messages():
@@ -500,7 +507,7 @@ func (c *TracesConsumerGroupHandler) ConsumeClaim(session sarama.ConsumerGroupSe
 				zap.Time("timestamp", message.Timestamp),
 				zap.String("topic", message.Topic))
 			if !c.messageMarking.After {
-				session.MarkMessage(message, "")
+				markMessage(session, message, "")
 			}
 
 			ctx := c.obsrecv.StartTracesOp(session.Context())
@@ -521,7 +528,7 @@ func (c *TracesConsumerGroupHandler) ConsumeClaim(session sarama.ConsumerGroupSe
 					[]tag.Mutator{tag.Upsert(tagInstanceName, c.id.String())},
 					statUnmarshalFailedSpans.M(1))
 				if c.messageMarking.After && c.messageMarking.OnError {
-					session.MarkMessage(message, "")
+					markMessage(session, message, "")
 				}
 				return err
 			}
@@ -532,12 +539,12 @@ func (c *TracesConsumerGroupHandler) ConsumeClaim(session sarama.ConsumerGroupSe
 			c.obsrecv.EndTracesOp(ctx, c.unmarshaler.Encoding(), spanCount, err)
 			if err != nil {
 				if c.messageMarking.After && c.messageMarking.OnError {
-					session.MarkMessage(message, "")
+					markMessage(session, message, "")
 				}
 				return err
 			}
 			if c.messageMarking.After {
-				session.MarkMessage(message, "")
+				markMessage(session, message, "")
 			}
 			if !c.autocommitEnabled {
 				session.Commit()
@@ -583,6 +590,12 @@ func (c *MetricsConsumerGroupHandler) ConsumeClaim(session sarama.ConsumerGroupS
 	if !c.autocommitEnabled {
 		defer session.Commit()
 	}
+	markMessage := func(session sarama.ConsumerGroupSession, message *sarama.ConsumerMessage, metadata string) {
+		if c.delegate != nil {
+			c.delegate.MarkMessage(session, message, metadata)
+		}
+		session.MarkMessage(message, metadata)
+	}
 	for {
 		select {
 		case message, ok := <-claim.Messages():
@@ -594,7 +607,7 @@ func (c *MetricsConsumerGroupHandler) ConsumeClaim(session sarama.ConsumerGroupS
 				zap.Time("timestamp", message.Timestamp),
 				zap.String("topic", message.Topic))
 			if !c.messageMarking.After {
-				session.MarkMessage(message, "")
+				markMessage(session, message, "")
 			}
 
 			ctx := c.obsrecv.StartMetricsOp(session.Context())
@@ -615,7 +628,7 @@ func (c *MetricsConsumerGroupHandler) ConsumeClaim(session sarama.ConsumerGroupS
 					[]tag.Mutator{tag.Upsert(tagInstanceName, c.id.String())},
 					statUnmarshalFailedMetricPoints.M(1))
 				if c.messageMarking.After && c.messageMarking.OnError {
-					session.MarkMessage(message, "")
+					markMessage(session, message, "")
 				}
 				return err
 			}
@@ -626,12 +639,12 @@ func (c *MetricsConsumerGroupHandler) ConsumeClaim(session sarama.ConsumerGroupS
 			c.obsrecv.EndMetricsOp(ctx, c.unmarshaler.Encoding(), dataPointCount, err)
 			if err != nil {
 				if c.messageMarking.After && c.messageMarking.OnError {
-					session.MarkMessage(message, "")
+					markMessage(session, message, "")
 				}
 				return err
 			}
 			if c.messageMarking.After {
-				session.MarkMessage(message, "")
+				markMessage(session, message, "")
 			}
 			if !c.autocommitEnabled {
 				session.Commit()

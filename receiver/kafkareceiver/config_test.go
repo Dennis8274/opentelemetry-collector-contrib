@@ -19,6 +19,22 @@ import (
 	"github.com/open-telemetry/opentelemetry-collector-contrib/receiver/kafkareceiver/internal/metadata"
 )
 
+func TestOthers(t *testing.T) {
+	var (
+		rawConf = map[string]any{}
+		conf    = &Config{}
+	)
+	rawConf["plain_text"] = map[string]any{
+		"password": "e_pwd",
+		"username": "e_user",
+	}
+	err := conf.UnmarshalAuth(rawConf)
+	if err != nil {
+		t.Fatalf("unmarshal auth config failed: %v", err)
+	}
+	t.Logf("auth plain_text:%+v\n", conf.Authentication.PlainText)
+}
+
 func TestLoadConfig(t *testing.T) {
 	t.Parallel()
 

@@ -10,6 +10,7 @@ import (
 	"github.com/IBM/sarama"
 	"go.opentelemetry.io/collector/component"
 	"go.opentelemetry.io/collector/config/configretry"
+	"go.opentelemetry.io/collector/confmap"
 	"go.opentelemetry.io/collector/exporter/exporterhelper"
 
 	"github.com/open-telemetry/opentelemetry-collector-contrib/internal/kafka"
@@ -57,6 +58,16 @@ type Config struct {
 
 	// Authentication defines used authentication mechanism.
 	Authentication kafka.Authentication `mapstructure:"auth"`
+}
+
+func (cfg *Config) UnmarshalAuth(authRaw map[string]any) error {
+	conf := confmap.NewFromStringMap(authRaw)
+
+	err := conf.Unmarshal(&cfg.Authentication)
+	if err != nil {
+		return err
+	}
+	return nil
 }
 
 // Metadata defines configuration for retrieving metadata from the broker.

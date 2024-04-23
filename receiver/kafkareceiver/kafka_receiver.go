@@ -146,8 +146,8 @@ func createKafkaClient(config Config) (sarama.ConsumerGroup, error) {
 	return sarama.NewConsumerGroup(config.Brokers, config.GroupID, saramaConfig)
 }
 
-func (c *KafkaTracesConsumer) Start(_ context.Context, host component.Host) error {
-	ctx, cancel := context.WithCancel(context.Background())
+func (c *KafkaTracesConsumer) Start(ctx context.Context, host component.Host) error {
+	ctx, cancel := context.WithCancel(ctx)
 	if c.delegate != nil {
 		if err := c.delegate.Start(ctx, host); err != nil {
 			cancel()
@@ -246,8 +246,14 @@ func newMetricsReceiver(config Config, set receiver.CreateSettings, unmarshaler 
 	}, nil
 }
 
-func (c *KafkaMetricsConsumer) Start(_ context.Context, _ component.Host) error {
-	ctx, cancel := context.WithCancel(context.Background())
+func (c *KafkaMetricsConsumer) Start(ctx context.Context, host component.Host) error {
+	ctx, cancel := context.WithCancel(ctx)
+	if c.delegate != nil {
+		if err := c.delegate.Start(ctx, host); err != nil {
+			cancel()
+			return err
+		}
+	}
 	c.cancelConsumeLoop = cancel
 	obsrecv, err := receiverhelper.NewObsReport(receiverhelper.ObsReportSettings{
 		ReceiverID:             c.settings.ID,
@@ -337,8 +343,14 @@ func newLogsReceiver(config Config, set receiver.CreateSettings, unmarshaler Log
 	}, nil
 }
 
-func (c *KafkaLogsConsumer) Start(_ context.Context, _ component.Host) error {
-	ctx, cancel := context.WithCancel(context.Background())
+func (c *KafkaLogsConsumer) Start(ctx context.Context, host component.Host) error {
+	ctx, cancel := context.WithCancel(ctx)
+	if c.delegate != nil {
+		if err := c.delegate.Start(ctx, host); err != nil {
+			cancel()
+			return err
+		}
+	}
 	c.cancelConsumeLoop = cancel
 	obsrecv, err := receiverhelper.NewObsReport(receiverhelper.ObsReportSettings{
 		ReceiverID:             c.settings.ID,

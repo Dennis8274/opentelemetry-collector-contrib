@@ -62,7 +62,10 @@ func (e *kafkaTracesProducer) tracesPusher(ctx context.Context, td ptrace.Traces
 		}
 		return err
 	}
-	return e.hook.Pushed(ctx, messages)
+	if e.hook != nil {
+		return e.hook.Pushed(ctx, messages)
+	}
+	return nil
 }
 
 func (e *kafkaTracesProducer) Close(ctx context.Context) error {
@@ -81,7 +84,10 @@ func (e *kafkaTracesProducer) start(ctx context.Context, _ component.Host) error
 		return err
 	}
 	e.producer = producer
-	return e.hook.Started(ctx, e.cfg)
+	if e.hook != nil {
+		return e.hook.Started(ctx, e.cfg)
+	}
+	return nil
 }
 
 // kafkaMetricsProducer uses sarama to produce metrics messages to kafka
@@ -109,7 +115,10 @@ func (e *kafkaMetricsProducer) metricsDataPusher(ctx context.Context, md pmetric
 		}
 		return err
 	}
-	return e.hook.Pushed(ctx, messages)
+	if e.hook != nil {
+		return e.hook.Pushed(ctx, messages)
+	}
+	return nil
 }
 
 func (e *kafkaMetricsProducer) Close(ctx context.Context) error {
@@ -117,7 +126,9 @@ func (e *kafkaMetricsProducer) Close(ctx context.Context) error {
 		return nil
 	}
 	defer func(hook ProducerHook, ctx context.Context, config Config) {
-		_ = hook.Closed(ctx, config)
+		if hook != nil {
+			_ = hook.Closed(ctx, config)
+		}
 	}(e.hook, ctx, e.cfg)
 	return e.producer.Close()
 }
@@ -128,7 +139,10 @@ func (e *kafkaMetricsProducer) start(ctx context.Context, _ component.Host) erro
 		return err
 	}
 	e.producer = producer
-	return e.hook.Started(ctx, e.cfg)
+	if e.hook != nil {
+		return e.hook.Started(ctx, e.cfg)
+	}
+	return nil
 }
 
 // kafkaLogsProducer uses sarama to produce logs messages to kafka
@@ -156,7 +170,10 @@ func (e *kafkaLogsProducer) logsDataPusher(ctx context.Context, ld plog.Logs) er
 		}
 		return err
 	}
-	return e.hook.Pushed(ctx, messages)
+	if e.hook != nil {
+		return e.hook.Pushed(ctx, messages)
+	}
+	return nil
 }
 
 func (e *kafkaLogsProducer) Close(ctx context.Context) error {
@@ -164,7 +181,9 @@ func (e *kafkaLogsProducer) Close(ctx context.Context) error {
 		return nil
 	}
 	defer func(hook ProducerHook, ctx context.Context, config Config) {
-		_ = hook.Closed(ctx, config)
+		if hook != nil {
+			_ = hook.Closed(ctx, config)
+		}
 	}(e.hook, ctx, e.cfg)
 	return e.producer.Close()
 }

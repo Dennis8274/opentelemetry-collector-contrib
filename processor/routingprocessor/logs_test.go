@@ -417,7 +417,7 @@ func TestLogsAttributeWithOTTLDoesNotCauseCrash(t *testing.T) {
 		DefaultExporters: []string{"otlp"},
 		Table: []RoutingTableItem{
 			{
-				Statement: `route() where attributes["value"] > 0`,
+				Statement: `route() where body["product"] == "cdb" and body["msgType"]== "test"`,
 				Exporters: []string{"otlp/1"},
 			},
 		},
@@ -428,7 +428,9 @@ func TestLogsAttributeWithOTTLDoesNotCauseCrash(t *testing.T) {
 
 	rl := l.ResourceLogs().AppendEmpty()
 	rl.Resource().Attributes().PutInt("value", 1)
-	rl.ScopeLogs().AppendEmpty().LogRecords().AppendEmpty()
+	emptyMap := rl.ScopeLogs().AppendEmpty().LogRecords().AppendEmpty().Body().SetEmptyMap()
+	emptyMap.PutStr("product", "cdb")
+	emptyMap.PutStr("msgType", "test")
 
 	require.NoError(t, exp.Start(context.Background(), host))
 
@@ -437,8 +439,8 @@ func TestLogsAttributeWithOTTLDoesNotCauseCrash(t *testing.T) {
 	require.NoError(t, exp.ConsumeLogs(context.Background(), l))
 
 	// verify
-	assert.Len(t, defaultExp.AllLogs(), 1)
-	assert.Len(t, firstExp.AllLogs(), 0)
+	assert.Len(t, defaultExp.AllLogs(), 0)
+	assert.Len(t, firstExp.AllLogs(), 1)
 }
 
 type mockLogsExporter struct {

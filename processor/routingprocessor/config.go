@@ -171,5 +171,7 @@ func rewriteRoutingEntriesToOTTL(cfg *Config) *Config {
 	return &Config{
 		DefaultExporters: cfg.DefaultExporters,
 		Table:            table,
+		RouteWatcherID:   cfg.RouteWatcherID,
+		AttributeSource:  cfg.AttributeSource,
 	}
 }

@@ -5,6 +5,7 @@ package kafkareceiver // import "github.com/open-telemetry/opentelemetry-collect
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strconv"
 	"sync"
@@ -387,7 +388,9 @@ func (c *KafkaLogsConsumer) Start(ctx context.Context, host component.Host) erro
 	}
 	go func() {
 		if err := c.consumeLoop(ctx, logsConsumerGroup); err != nil {
-			c.settings.ReportStatus(component.NewFatalErrorEvent(err))
+			if !errors.Is(err, context.Canceled) {
+				c.settings.ReportStatus(component.NewFatalErrorEvent(err))
+			}
 		}
 	}()
 	<-logsConsumerGroup.ready
@@ -411,9 +414,6 @@ func (c *KafkaLogsConsumer) consumeLoop(ctx context.Context, handler sarama.Cons
 }
 
 func (c *KafkaLogsConsumer) Shutdown(context.Context) error {
-	defer func() {
-		c.settings.Logger.Info("shutdown kafka log consumer")
-	}()
 	if c.cancelConsumeLoop == nil {
 		return nil
 	}

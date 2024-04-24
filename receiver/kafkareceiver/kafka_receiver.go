@@ -411,6 +411,9 @@ func (c *KafkaLogsConsumer) consumeLoop(ctx context.Context, handler sarama.Cons
 }
 
 func (c *KafkaLogsConsumer) Shutdown(context.Context) error {
+	defer func() {
+		c.settings.Logger.Info("shutdown kafka log consumer")
+	}()
 	if c.cancelConsumeLoop == nil {
 		return nil
 	}

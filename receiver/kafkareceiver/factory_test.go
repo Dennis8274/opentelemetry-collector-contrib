@@ -41,7 +41,7 @@ func TestCreateTracesReceiver(t *testing.T) {
 
 func TestWithTracesUnmarshalers(t *testing.T) {
 	unmarshaler := &customTracesUnmarshaler{}
-	f := NewFactory(withTracesUnmarshalers(unmarshaler))
+	f := NewFactory(WithTracesUnmarshalers(unmarshaler))
 	cfg := createDefaultConfig().(*Config)
 	// disable contacting broker
 	cfg.Metadata.Full = false
@@ -80,7 +80,7 @@ func TestCreateMetricsReceiver(t *testing.T) {
 
 func TestWithMetricsUnmarshalers(t *testing.T) {
 	unmarshaler := &customMetricsUnmarshaler{}
-	f := NewFactory(withMetricsUnmarshalers(unmarshaler))
+	f := NewFactory(WithMetricsUnmarshalers(unmarshaler))
 	cfg := createDefaultConfig().(*Config)
 	// disable contacting broker
 	cfg.Metadata.Full = false
@@ -141,7 +141,7 @@ func TestGetLogsUnmarshaler_encoding_text_error(t *testing.T) {
 
 func TestWithLogsUnmarshalers(t *testing.T) {
 	unmarshaler := &customLogsUnmarshaler{}
-	f := NewFactory(withLogsUnmarshalers(unmarshaler))
+	f := NewFactory(WithLogsUnmarshalers(unmarshaler))
 	cfg := createDefaultConfig().(*Config)
 	// disable contacting broker
 	cfg.Metadata.Full = false

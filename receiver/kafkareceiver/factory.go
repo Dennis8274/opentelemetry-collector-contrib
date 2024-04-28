@@ -46,8 +46,8 @@ var errUnrecognizedEncoding = fmt.Errorf("unrecognized encoding")
 // FactoryOption applies changes to kafkaExporterFactory.
 type FactoryOption func(factory *kafkaReceiverFactory)
 
-// withTracesUnmarshalers adds Unmarshalers.
-func withTracesUnmarshalers(tracesUnmarshalers ...TracesUnmarshaler) FactoryOption {
+// WithTracesUnmarshalers adds Unmarshalers.
+func WithTracesUnmarshalers(tracesUnmarshalers ...TracesUnmarshaler) FactoryOption {
 	return func(factory *kafkaReceiverFactory) {
 		for _, unmarshaler := range tracesUnmarshalers {
 			factory.tracesUnmarshalers[unmarshaler.Encoding()] = unmarshaler
@@ -55,8 +55,8 @@ func withTracesUnmarshalers(tracesUnmarshalers ...TracesUnmarshaler) FactoryOpti
 	}
 }
 
-// withMetricsUnmarshalers adds MetricsUnmarshalers.
-func withMetricsUnmarshalers(metricsUnmarshalers ...MetricsUnmarshaler) FactoryOption {
+// WithMetricsUnmarshalers adds MetricsUnmarshalers.
+func WithMetricsUnmarshalers(metricsUnmarshalers ...MetricsUnmarshaler) FactoryOption {
 	return func(factory *kafkaReceiverFactory) {
 		for _, unmarshaler := range metricsUnmarshalers {
 			factory.metricsUnmarshalers[unmarshaler.Encoding()] = unmarshaler
@@ -64,8 +64,8 @@ func withMetricsUnmarshalers(metricsUnmarshalers ...MetricsUnmarshaler) FactoryO
 	}
 }
 
-// withLogsUnmarshalers adds LogsUnmarshalers.
-func withLogsUnmarshalers(logsUnmarshalers ...LogsUnmarshaler) FactoryOption {
+// WithLogsUnmarshalers adds LogsUnmarshalers.
+func WithLogsUnmarshalers(logsUnmarshalers ...LogsUnmarshaler) FactoryOption {
 	return func(factory *kafkaReceiverFactory) {
 		for _, unmarshaler := range logsUnmarshalers {
 			factory.logsUnmarshalers[unmarshaler.Encoding()] = unmarshaler

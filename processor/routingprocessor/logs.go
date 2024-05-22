@@ -128,6 +128,7 @@ func (p *logProcessor) consumeLoop(ctx context.Context) {
 			}(payload)
 		case conf := <-p.routeConfCh:
 			p.router.table = conf.table
+			p.router.routes = map[string]routingItem[exporter.Logs, ottllog.TransformContext]{}
 			if err := p.router.registerRouteExporters(conf.available); err != nil {
 				p.logger.Error("failed to register exporters", zap.Error(err))
 			}

@@ -73,21 +73,21 @@ func WithLogsUnmarshalers(logsUnmarshalers ...LogsUnmarshaler) FactoryOption {
 	}
 }
 
-func WithTraceConsumerGroupHandlerHook(hook HandlerHook) FactoryOption {
+func WithTraceConsumerGroupHandlerHook(hookFactory func() HandlerHook) FactoryOption {
 	return func(factory *kafkaReceiverFactory) {
-		factory.traceHandlerHook = hook
+		factory.traceHandlerHook = hookFactory
 	}
 }
 
-func WithMetricConsumerGroupHandlerHook(hook HandlerHook) FactoryOption {
+func WithMetricConsumerGroupHandlerHook(hookFactory func() HandlerHook) FactoryOption {
 	return func(factory *kafkaReceiverFactory) {
-		factory.metricHandlerHook = hook
+		factory.metricHandlerHook = hookFactory
 	}
 }
 
-func WithLogConsumerGroupHandlerHook(hook HandlerHook) FactoryOption {
+func WithLogConsumerGroupHandlerHook(hookFactory func() HandlerHook) FactoryOption {
 	return func(factory *kafkaReceiverFactory) {
-		factory.logHandlerHook = hook
+		factory.logHandlerHook = hookFactory
 	}
 }
 
@@ -144,9 +144,9 @@ type kafkaReceiverFactory struct {
 	tracesUnmarshalers  map[string]TracesUnmarshaler
 	metricsUnmarshalers map[string]MetricsUnmarshaler
 	logsUnmarshalers    map[string]LogsUnmarshaler
-	traceHandlerHook    HandlerHook
-	metricHandlerHook   HandlerHook
-	logHandlerHook      HandlerHook
+	traceHandlerHook    func() HandlerHook
+	metricHandlerHook   func() HandlerHook
+	logHandlerHook      func() HandlerHook
 }
 
 func (f *kafkaReceiverFactory) createTracesReceiver(
@@ -168,7 +168,7 @@ func (f *kafkaReceiverFactory) createTracesReceiver(
 		return nil, errUnrecognizedEncoding
 	}
 
-	r, err := newTracesReceiver(oCfg, set, unmarshaler, f.traceHandlerHook, nextConsumer)
+	r, err := newTracesReceiver(oCfg, set, unmarshaler, f.traceHandlerHook(), nextConsumer)
 	if err != nil {
 		return nil, err
 	}
@@ -194,7 +194,7 @@ func (f *kafkaReceiverFactory) createMetricsReceiver(
 		return nil, errUnrecognizedEncoding
 	}
 
-	r, err := newMetricsReceiver(oCfg, set, unmarshaler, f.metricHandlerHook, nextConsumer)
+	r, err := newMetricsReceiver(oCfg, set, unmarshaler, f.metricHandlerHook(), nextConsumer)
 	if err != nil {
 		return nil, err
 	}
@@ -220,7 +220,7 @@ func (f *kafkaReceiverFactory) createLogsReceiver(
 		return nil, err
 	}
 
-	r, err := newLogsReceiver(oCfg, set, unmarshaler, f.logHandlerHook, nextConsumer)
+	r, err := newLogsReceiver(oCfg, set, unmarshaler, f.logHandlerHook(), nextConsumer)
 	if err != nil {
 		return nil, err
 	}

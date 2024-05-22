@@ -36,6 +36,7 @@ type markMessageCallback func()
 
 type HandlerHook interface {
 	sarama.ConsumerGroupHandler
+	Init(Config, receiver.CreateSettings)
 	Start(context.Context, component.Host) error
 	Shutdown(context.Context) error
 	MarkMessage(message *sarama.ConsumerMessage)
@@ -107,6 +108,7 @@ func newTracesReceiver(config Config, set receiver.CreateSettings, unmarshaler T
 		return nil, errUnrecognizedEncoding
 	}
 
+	hook.Init(config, set)
 	return &KafkaTracesConsumer{
 		config:            config,
 		topics:            []string{config.Topic},
@@ -233,6 +235,7 @@ func newMetricsReceiver(config Config, set receiver.CreateSettings, unmarshaler 
 		return nil, errUnrecognizedEncoding
 	}
 
+	hook.Init(config, set)
 	return &KafkaMetricsConsumer{
 		config:            config,
 		topics:            []string{config.Topic},
@@ -330,6 +333,7 @@ func newLogsReceiver(config Config, set receiver.CreateSettings, unmarshaler Log
 		return nil, errUnrecognizedEncoding
 	}
 
+	hook.Init(config, set)
 	return &KafkaLogsConsumer{
 		config:            config,
 		topics:            []string{config.Topic},

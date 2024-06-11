@@ -5,6 +5,7 @@ package kafkaexporter // import "github.com/open-telemetry/opentelemetry-collect
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"github.com/IBM/sarama"
@@ -206,17 +207,49 @@ func (f *kafkaExporterFactory) createLogsExporter(
 	if err != nil {
 		return nil, err
 	}
-	return exporterhelper.NewLogsExporter(
+	if oCfg.DeferConsumerBuilder == nil {
+		return exporterhelper.NewLogsExporter(
+			ctx,
+			set,
+			&oCfg,
+			exp.logsDataPusher,
+			exporterhelper.WithCapabilities(consumer.Capabilities{MutatesData: false}),
+			// Disable exporterhelper Timeout, because we cannot pass a Context to the Producer,
+			// and will rely on the sarama Producer Timeout logic.
+			exporterhelper.WithTimeout(exporterhelper.TimeoutSettings{Timeout: 0}),
+			exporterhelper.WithRetry(oCfg.BackOffConfig),
+			exporterhelper.WithQueue(oCfg.QueueSettings),
+			exporterhelper.WithStart(exp.start),
+			exporterhelper.WithShutdown(exp.Close))
+	}
+
+	var holder = deferConsumerBuilderHolder{}
+	return exporterhelper.NewLogsDeferExporter(
 		ctx,
 		set,
 		&oCfg,
 		exp.logsDataPusher,
+		holder.ConsumeLogs,
 		exporterhelper.WithCapabilities(consumer.Capabilities{MutatesData: false}),
 		// Disable exporterhelper Timeout, because we cannot pass a Context to the Producer,
 		// and will rely on the sarama Producer Timeout logic.
 		exporterhelper.WithTimeout(exporterhelper.TimeoutSettings{Timeout: 0}),
 		exporterhelper.WithRetry(oCfg.BackOffConfig),
 		exporterhelper.WithQueue(oCfg.QueueSettings),
-		exporterhelper.WithStart(exp.start),
+		exporterhelper.WithStart(func(ctx context.Context, host component.Host) error {
+			if err := exp.start(ctx, host); err != nil {
+				return err
+			}
+			c, ok := host.GetExtensions()[*oCfg.DeferConsumerBuilder]
+			if !ok || c == nil {
+				return fmt.Errorf("deferred consumer builder %q not found", *oCfg.DeferConsumerBuilder)
+			}
+			builder, ok := c.(DeferConsumerBuilder)
+			if !ok {
+				return fmt.Errorf("deferred consumer builder %q is not a DeferConsumerBuilder", *oCfg.DeferConsumerBuilder)
+			}
+			holder.f = builder.BuildLogConsumer()
+			return nil
+		}),
 		exporterhelper.WithShutdown(exp.Close))
 }

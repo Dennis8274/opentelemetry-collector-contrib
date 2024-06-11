@@ -18,7 +18,7 @@ var errExporterNotFound = errors.New("exporter not found")
 type OnRouteConfChanged func(table []RoutingTableItem, available map[component.ID]component.Component) error
 
 type RouteConfWatcher interface {
-	AddRouteConfListener(OnRouteConfChanged)
+	AddRouteConfListener(component.ID, OnRouteConfChanged)
 }
 
 // router registers exporters and default exporters for an exporter. router can

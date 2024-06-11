@@ -58,6 +58,8 @@ type Config struct {
 
 	// Authentication defines used authentication mechanism.
 	Authentication kafka.Authentication `mapstructure:"auth"`
+
+	DeferConsumerBuilder *component.ID `mapstructure:"defer_consumer_builder"`
 }
 
 func (cfg *Config) UnmarshalAuth(authRaw map[string]any) error {

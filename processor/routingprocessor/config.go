@@ -59,7 +59,9 @@ type Config struct {
 	// Required.
 	Table []RoutingTableItem `mapstructure:"table"`
 
-	RouteWatcherID *component.ID `mapstructure:"route_watcher"`
+	RouteWatcherID component.ID `mapstructure:"route_watcher"`
+
+	RouteID component.ID `mapstructure:"route_id"`
 }
 
 // Validate checks if the processor configuration is valid.
@@ -172,6 +174,7 @@ func rewriteRoutingEntriesToOTTL(cfg *Config) *Config {
 		DefaultExporters: cfg.DefaultExporters,
 		Table:            table,
 		RouteWatcherID:   cfg.RouteWatcherID,
+		RouteID:          cfg.RouteID,
 		AttributeSource:  cfg.AttributeSource,
 	}
 }

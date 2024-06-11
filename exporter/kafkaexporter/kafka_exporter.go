@@ -10,6 +10,7 @@ import (
 
 	"github.com/IBM/sarama"
 	"go.opentelemetry.io/collector/component"
+	"go.opentelemetry.io/collector/consumer"
 	"go.opentelemetry.io/collector/consumer/consumererror"
 	"go.opentelemetry.io/collector/exporter"
 	"go.opentelemetry.io/collector/pdata/plog"
@@ -26,6 +27,21 @@ type ProducerHook interface {
 	Pushed(ctx context.Context, messages []*sarama.ProducerMessage) error
 	Started(ctx context.Context, config Config) error
 	Closed(ctx context.Context, config Config) error
+}
+
+type DeferConsumerBuilder interface {
+	component.Component
+	BuildLogConsumer() consumer.ConsumeLogsFunc
+	//BuildMetricsConsumer() consumer.ConsumeMetricsFunc
+	//BuildTracesConsumer() consumer.ConsumeTracesFunc
+}
+
+type deferConsumerBuilderHolder struct {
+	f consumer.ConsumeLogsFunc
+}
+
+func (d *deferConsumerBuilderHolder) ConsumeLogs(ctx context.Context, ld plog.Logs) error {
+	return d.f(ctx, ld)
 }
 
 // kafkaTracesProducer uses sarama to produce trace messages to Kafka.

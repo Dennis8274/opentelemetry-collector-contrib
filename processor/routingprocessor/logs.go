@@ -89,13 +89,13 @@ func (p *logProcessor) Start(ctx context.Context, host component.Host) error {
 	if err != nil {
 		return err
 	}
-	watcherExt, ok := host.GetExtensions()[*p.config.RouteWatcherID]
+	watcherExt, ok := host.GetExtensions()[p.config.RouteWatcherID]
 	if !ok || watcherExt == nil {
 		return fmt.Errorf("unknown route watcher extension with id %s", p.config.RouteWatcherID)
 	}
 	routeConfWatcher, ok := watcherExt.(RouteConfWatcher)
 	if ok {
-		routeConfWatcher.AddRouteConfListener(func(table []RoutingTableItem, available map[component.ID]component.Component) error {
+		routeConfWatcher.AddRouteConfListener(p.config.RouteID, func(table []RoutingTableItem, available map[component.ID]component.Component) error {
 			p.routeConfCh <- &routeConf{
 				table:     table,
 				available: available,

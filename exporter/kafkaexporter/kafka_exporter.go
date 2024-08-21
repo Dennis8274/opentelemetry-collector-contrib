@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/IBM/sarama"
 	"go.opentelemetry.io/collector/component"
@@ -24,9 +25,8 @@ import (
 var errUnrecognizedEncoding = fmt.Errorf("unrecognized encoding")
 
 type ProducerHook interface {
-	Pushed(ctx context.Context, messages []*sarama.ProducerMessage) error
-	Started(ctx context.Context, config Config) error
-	Closed(ctx context.Context, config Config) error
+	component.Component
+	Ack(ctx context.Context, topic string, partition, offset int64)
 }
 
 type DeferConsumerBuilder interface {
@@ -51,7 +51,6 @@ type kafkaTracesProducer struct {
 	topic     string
 	marshaler TracesMarshaler
 	logger    *zap.Logger
-	hook      ProducerHook
 }
 
 type kafkaErrors struct {
@@ -78,9 +77,6 @@ func (e *kafkaTracesProducer) tracesPusher(ctx context.Context, td ptrace.Traces
 		}
 		return err
 	}
-	if e.hook != nil {
-		return e.hook.Pushed(ctx, messages)
-	}
 	return nil
 }
 
@@ -88,9 +84,6 @@ func (e *kafkaTracesProducer) Close(ctx context.Context) error {
 	if e.producer == nil {
 		return nil
 	}
-	defer func(hook ProducerHook, ctx context.Context, config Config) {
-		_ = hook.Closed(ctx, config)
-	}(e.hook, ctx, e.cfg)
 	return e.producer.Close()
 }
 
@@ -100,9 +93,6 @@ func (e *kafkaTracesProducer) start(ctx context.Context, _ component.Host) error
 		return err
 	}
 	e.producer = producer
-	if e.hook != nil {
-		return e.hook.Started(ctx, e.cfg)
-	}
 	return nil
 }
 
@@ -113,7 +103,6 @@ type kafkaMetricsProducer struct {
 	topic     string
 	marshaler MetricsMarshaler
 	logger    *zap.Logger
-	hook      ProducerHook
 }
 
 func (e *kafkaMetricsProducer) metricsDataPusher(ctx context.Context, md pmetric.Metrics) error {
@@ -131,9 +120,6 @@ func (e *kafkaMetricsProducer) metricsDataPusher(ctx context.Context, md pmetric
 		}
 		return err
 	}
-	if e.hook != nil {
-		return e.hook.Pushed(ctx, messages)
-	}
 	return nil
 }
 
@@ -141,11 +127,6 @@ func (e *kafkaMetricsProducer) Close(ctx context.Context) error {
 	if e.producer == nil {
 		return nil
 	}
-	defer func(hook ProducerHook, ctx context.Context, config Config) {
-		if hook != nil {
-			_ = hook.Closed(ctx, config)
-		}
-	}(e.hook, ctx, e.cfg)
 	return e.producer.Close()
 }
 
@@ -155,9 +136,6 @@ func (e *kafkaMetricsProducer) start(ctx context.Context, _ component.Host) erro
 		return err
 	}
 	e.producer = producer
-	if e.hook != nil {
-		return e.hook.Started(ctx, e.cfg)
-	}
 	return nil
 }
 
@@ -187,8 +165,27 @@ func (e *kafkaLogsProducer) logsDataPusher(ctx context.Context, ld plog.Logs) er
 		return err
 	}
 	if e.hook != nil {
-		return e.hook.Pushed(ctx, messages)
+		logs := ld.ResourceLogs()
+		for i := 0; i < logs.Len(); i++ {
+			attributes := logs.At(i).Resource().Attributes()
+			var (
+				topic             string
+				partition, offset int64
+			)
+
+			if t, ok := attributes.Get("topic"); ok {
+				topic = t.Str()
+			}
+			if p, ok := attributes.Get("partition"); ok {
+				partition = p.Int()
+			}
+			if o, ok := attributes.Get("offset"); ok {
+				offset = o.Int()
+			}
+			e.hook.Ack(ctx, topic, partition, offset)
+		}
 	}
+
 	return nil
 }
 
@@ -196,21 +193,21 @@ func (e *kafkaLogsProducer) Close(ctx context.Context) error {
 	if e.producer == nil {
 		return nil
 	}
-	defer func(hook ProducerHook, ctx context.Context, config Config) {
+	defer func(hook ProducerHook, ctx context.Context) {
 		if hook != nil {
-			_ = hook.Closed(ctx, config)
+			_ = hook.Shutdown(ctx)
 		}
-	}(e.hook, ctx, e.cfg)
+	}(e.hook, ctx)
 	return e.producer.Close()
 }
 
-func (e *kafkaLogsProducer) start(ctx context.Context, _ component.Host) error {
+func (e *kafkaLogsProducer) start(ctx context.Context, host component.Host) error {
 	producer, err := newSaramaProducer(e.cfg)
 	if err != nil {
 		return err
 	}
 	e.producer = producer
-	return e.hook.Started(ctx, e.cfg)
+	return e.hook.Start(ctx, host)
 }
 
 func newSaramaProducer(config Config) (sarama.SyncProducer, error) {
@@ -229,6 +226,9 @@ func newSaramaProducer(config Config) (sarama.SyncProducer, error) {
 	c.Metadata.Retry.Backoff = config.Metadata.Retry.Backoff
 	c.Producer.MaxMessageBytes = config.Producer.MaxMessageBytes
 	c.Producer.Flush.MaxMessages = config.Producer.FlushMaxMessages
+	c.Producer.Flush.Bytes = 512 * 1024
+	c.Producer.Flush.Frequency = 100 * time.Millisecond
+	c.Producer.Flush.Messages = 1024
 
 	if config.ResolveCanonicalBootstrapServersOnly {
 		c.Net.ResolveCanonicalBootstrapServers = true
@@ -259,7 +259,7 @@ func newSaramaProducer(config Config) (sarama.SyncProducer, error) {
 	return producer, nil
 }
 
-func newMetricsExporter(config Config, set exporter.CreateSettings, marshalers map[string]MetricsMarshaler, hook ProducerHook) (*kafkaMetricsProducer, error) {
+func newMetricsExporter(config Config, set exporter.CreateSettings, marshalers map[string]MetricsMarshaler) (*kafkaMetricsProducer, error) {
 	marshaler := marshalers[config.Encoding]
 	if marshaler == nil {
 		return nil, errUnrecognizedEncoding
@@ -269,13 +269,12 @@ func newMetricsExporter(config Config, set exporter.CreateSettings, marshalers m
 		topic:     config.Topic,
 		marshaler: marshaler,
 		logger:    set.Logger,
-		hook:      hook,
 	}, nil
 
 }
 
 // newTracesExporter creates Kafka exporter.
-func newTracesExporter(config Config, set exporter.CreateSettings, marshalers map[string]TracesMarshaler, hook ProducerHook) (*kafkaTracesProducer, error) {
+func newTracesExporter(config Config, set exporter.CreateSettings, marshalers map[string]TracesMarshaler) (*kafkaTracesProducer, error) {
 	marshaler := marshalers[config.Encoding]
 	if marshaler == nil {
 		return nil, errUnrecognizedEncoding
@@ -291,7 +290,6 @@ func newTracesExporter(config Config, set exporter.CreateSettings, marshalers ma
 		topic:     config.Topic,
 		marshaler: marshaler,
 		logger:    set.Logger,
-		hook:      hook,
 	}, nil
 }
 

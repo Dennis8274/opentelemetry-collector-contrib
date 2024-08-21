@@ -141,7 +141,7 @@ func (f *kafkaExporterFactory) createTracesExporter(
 	if oCfg.Encoding == "otlp_json" {
 		set.Logger.Info("otlp_json is considered experimental and should not be used in a production environment")
 	}
-	exp, err := newTracesExporter(oCfg, set, f.tracesMarshalers, f.producerHook)
+	exp, err := newTracesExporter(oCfg, set, f.tracesMarshalers)
 	if err != nil {
 		return nil, err
 	}
@@ -172,7 +172,7 @@ func (f *kafkaExporterFactory) createMetricsExporter(
 	if oCfg.Encoding == "otlp_json" {
 		set.Logger.Info("otlp_json is considered experimental and should not be used in a production environment")
 	}
-	exp, err := newMetricsExporter(oCfg, set, f.metricsMarshalers, f.producerHook)
+	exp, err := newMetricsExporter(oCfg, set, f.metricsMarshalers)
 	if err != nil {
 		return nil, err
 	}
@@ -219,6 +219,7 @@ func (f *kafkaExporterFactory) createLogsExporter(
 			exporterhelper.WithTimeout(exporterhelper.TimeoutSettings{Timeout: 0}),
 			exporterhelper.WithRetry(oCfg.BackOffConfig),
 			exporterhelper.WithQueue(oCfg.QueueSettings),
+			exporterhelper.WithBatcher(oCfg.Config),
 			exporterhelper.WithStart(exp.start),
 			exporterhelper.WithShutdown(exp.Close))
 	}
@@ -236,6 +237,7 @@ func (f *kafkaExporterFactory) createLogsExporter(
 		exporterhelper.WithTimeout(exporterhelper.TimeoutSettings{Timeout: 0}),
 		exporterhelper.WithRetry(oCfg.BackOffConfig),
 		exporterhelper.WithQueue(oCfg.QueueSettings),
+		exporterhelper.WithBatcher(oCfg.Config),
 		exporterhelper.WithStart(func(ctx context.Context, host component.Host) error {
 			if err := exp.start(ctx, host); err != nil {
 				return err
@@ -250,6 +252,5 @@ func (f *kafkaExporterFactory) createLogsExporter(
 			}
 			holder.f = builder.BuildLogConsumer()
 			return nil
-		}),
-		exporterhelper.WithShutdown(exp.Close))
+		}), exporterhelper.WithShutdown(exp.Close))
 }

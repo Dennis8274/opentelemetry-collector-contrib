@@ -11,6 +11,7 @@ import (
 
 var (
 	tagInstanceName, _ = tag.NewKey("name")
+	tagTopic, _        = tag.NewKey("topic")
 	tagPartition, _    = tag.NewKey("partition")
 
 	statMessageCount     = stats.Int64("kafka_receiver_messages", "Number of received messages", stats.UnitDimensionless)
@@ -28,7 +29,7 @@ var (
 // metricViews return metric views for Kafka receiver.
 func metricViews() []*view.View {
 	partitionAgnosticTagKeys := []tag.Key{tagInstanceName}
-	partitionSpecificTagKeys := []tag.Key{tagInstanceName, tagPartition}
+	partitionSpecificTagKeys := []tag.Key{tagTopic, tagInstanceName, tagPartition}
 
 	countMessages := &view.View{
 		Name:        statMessageCount.Name(),

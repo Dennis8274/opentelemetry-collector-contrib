@@ -31,9 +31,12 @@ var errInvalidInitialOffset = fmt.Errorf("invalid initial offset")
 
 const (
 	kafkaMarkMessageCallback = 1
+
+	AttrKeyRecvTopic     = "receiver_topic"
+	AttrKeyRecvPartition = "receiver_partition"
 )
 
-type markMessageCallback func(topic string, partition, offset int64)
+type markMessageCallback func()
 
 type HandlerHook interface {
 	sarama.ConsumerGroupHandler
@@ -753,15 +756,20 @@ func (c *LogsConsumerGroupHandler) ConsumeClaim(session sarama.ConsumerGroupSess
 				return err
 			}
 			c.headerExtractor.extractHeadersLogs(logs, message)
+
+			topic := message.Topic
+			partition := int64(message.Partition)
+			offset := message.Offset
 			resourceLogs := logs.ResourceLogs()
 			for i := 0; i < resourceLogs.Len(); i++ {
 				attributes := resourceLogs.At(i).Resource().Attributes()
-				attributes.PutStr("topic", message.Topic)
-				attributes.PutInt("partition", int64(message.Partition))
-				attributes.PutInt("offset", message.Offset)
+				attributes.PutStr(AttrKeyRecvTopic, topic)
+				attributes.PutInt(AttrKeyRecvPartition, partition)
 			}
 			logRecordCount := logs.LogRecordCount()
-			err = c.nextConsumer.ConsumeLogs(context.WithValue(session.Context(), kafkaMarkMessageCallback, markMessageCallback(c.delegate.Ack)), logs)
+			err = c.nextConsumer.ConsumeLogs(context.WithValue(session.Context(), kafkaMarkMessageCallback, func() {
+				c.delegate.Ack(topic, partition, offset)
+			}), logs)
 			c.obsrecv.EndLogsOp(ctx, c.unmarshaler.Encoding(), logRecordCount, err)
 			if err != nil {
 				if c.messageMarking.After && c.messageMarking.OnError {
@@ -785,7 +793,7 @@ func (c *LogsConsumerGroupHandler) ConsumeClaim(session sarama.ConsumerGroupSess
 	}
 }
 
-func MarkMessage(ctx context.Context, topic string, partition, offset int64) {
+func MarkMessage(ctx context.Context) {
 	value := ctx.Value(kafkaMarkMessageCallback)
 	if value == nil {
 		return
@@ -794,7 +802,7 @@ func MarkMessage(ctx context.Context, topic string, partition, offset int64) {
 	if !ok {
 		return
 	}
-	callback(topic, partition, offset)
+	callback()
 }
 
 func toSaramaInitialOffset(initialOffset string) (int64, error) {

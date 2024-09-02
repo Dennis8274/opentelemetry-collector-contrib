@@ -767,9 +767,9 @@ func (c *LogsConsumerGroupHandler) ConsumeClaim(session sarama.ConsumerGroupSess
 				attributes.PutInt(AttrKeyRecvPartition, partition)
 			}
 			logRecordCount := logs.LogRecordCount()
-			err = c.nextConsumer.ConsumeLogs(context.WithValue(session.Context(), kafkaMarkMessageCallback, func() {
+			err = c.nextConsumer.ConsumeLogs(context.WithValue(session.Context(), kafkaMarkMessageCallback, markMessageCallback(func() {
 				c.delegate.Ack(topic, partition, offset)
-			}), logs)
+			})), logs)
 			c.obsrecv.EndLogsOp(ctx, c.unmarshaler.Encoding(), logRecordCount, err)
 			if err != nil {
 				if c.messageMarking.After && c.messageMarking.OnError {

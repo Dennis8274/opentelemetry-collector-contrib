@@ -34,6 +34,7 @@ const (
 
 	AttrKeyRecvTopic     = "receiver_topic"
 	AttrKeyRecvPartition = "receiver_partition"
+	AttrKeyRecvOffset    = "receiver_offset"
 )
 
 type markMessageCallback func()
@@ -653,10 +654,24 @@ func (c *MetricsConsumerGroupHandler) ConsumeClaim(session sarama.ConsumerGroupS
 				}
 				return err
 			}
+
+			topic := message.Topic
+			partition := int64(message.Partition)
+			offset := message.Offset
+			resourceMetrics := metrics.ResourceMetrics()
+			for i := 0; i < resourceMetrics.Len(); i++ {
+				attributes := resourceMetrics.At(i).Resource().Attributes()
+				attributes.PutStr(AttrKeyRecvTopic, topic)
+				attributes.PutInt(AttrKeyRecvPartition, partition)
+				attributes.PutInt(AttrKeyRecvOffset, offset)
+			}
+
 			c.headerExtractor.extractHeadersMetrics(metrics, message)
 
 			dataPointCount := metrics.DataPointCount()
-			err = c.nextConsumer.ConsumeMetrics(session.Context(), metrics)
+			err = c.nextConsumer.ConsumeMetrics(context.WithValue(session.Context(), kafkaMarkMessageCallback, markMessageCallback(func() {
+				c.delegate.Ack(topic, partition, offset)
+			})), metrics)
 			c.obsrecv.EndMetricsOp(ctx, c.unmarshaler.Encoding(), dataPointCount, err)
 			if err != nil {
 				if c.messageMarking.After && c.messageMarking.OnError {
@@ -765,6 +780,7 @@ func (c *LogsConsumerGroupHandler) ConsumeClaim(session sarama.ConsumerGroupSess
 				attributes := resourceLogs.At(i).Resource().Attributes()
 				attributes.PutStr(AttrKeyRecvTopic, topic)
 				attributes.PutInt(AttrKeyRecvPartition, partition)
+				attributes.PutInt(AttrKeyRecvOffset, offset)
 			}
 			logRecordCount := logs.LogRecordCount()
 			err = c.nextConsumer.ConsumeLogs(context.WithValue(session.Context(), kafkaMarkMessageCallback, markMessageCallback(func() {

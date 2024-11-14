@@ -93,6 +93,7 @@ type KafkaLogsConsumer struct {
 	topics            []string
 	cancelConsumeLoop context.CancelFunc
 	unmarshaler       LogsUnmarshaler
+	extractor         CustomExtractor
 
 	settings receiver.CreateSettings
 
@@ -336,7 +337,7 @@ func (c *KafkaMetricsConsumer) Shutdown(context.Context) error {
 	return c.consumerGroup.Close()
 }
 
-func newLogsReceiver(config Config, set receiver.CreateSettings, unmarshaler LogsUnmarshaler, hook HandlerHook, nextConsumer consumer.Logs) (*KafkaLogsConsumer, error) {
+func newLogsReceiver(config Config, set receiver.CreateSettings, unmarshaler LogsUnmarshaler, extractor CustomExtractor, hook HandlerHook, nextConsumer consumer.Logs) (*KafkaLogsConsumer, error) {
 	if unmarshaler == nil {
 		return nil, errUnrecognizedEncoding
 	}
@@ -347,6 +348,7 @@ func newLogsReceiver(config Config, set receiver.CreateSettings, unmarshaler Log
 		topics:            []string{config.Topic},
 		nextConsumer:      nextConsumer,
 		unmarshaler:       unmarshaler,
+		extractor:         extractor,
 		settings:          set,
 		autocommitEnabled: config.AutoCommit.Enable,
 		messageMarking:    config.MessageMarking,
@@ -389,6 +391,7 @@ func (c *KafkaLogsConsumer) Start(ctx context.Context, host component.Host) erro
 		autocommitEnabled: c.autocommitEnabled,
 		messageMarking:    c.messageMarking,
 		headerExtractor:   &nopHeaderExtractor{},
+		customExtractor:   c.extractor,
 		delegate:          c.delegate,
 	}
 
@@ -483,6 +486,7 @@ type LogsConsumerGroupHandler struct {
 
 	autocommitEnabled bool
 	messageMarking    MessageMarking
+	customExtractor   CustomExtractor
 	headerExtractor   HeaderExtractor
 	delegate          HandlerHook
 }
@@ -771,6 +775,7 @@ func (c *LogsConsumerGroupHandler) ConsumeClaim(session sarama.ConsumerGroupSess
 				return err
 			}
 			c.headerExtractor.extractHeadersLogs(logs, message)
+			c.customExtractor.ExtractLogs(session.Context(), logs, message)
 
 			topic := message.Topic
 			partition := int64(message.Partition)

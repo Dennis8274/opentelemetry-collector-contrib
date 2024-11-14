@@ -75,6 +75,8 @@ type Config struct {
 
 	// Extract headers from kafka records
 	HeaderExtraction HeaderExtraction `mapstructure:"header_extraction"`
+
+	CustomExtractorName string `mapstructure:"custom_extractor"`
 }
 
 func (cfg *Config) UnmarshalAuth(authRaw map[string]any) error {

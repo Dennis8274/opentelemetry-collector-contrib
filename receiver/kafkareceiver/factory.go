@@ -104,9 +104,10 @@ func NewFactory(options ...FactoryOption) receiver.Factory {
 	_ = view.Register(metricViews()...)
 
 	f := &kafkaReceiverFactory{
-		tracesUnmarshalers:  map[string]TracesUnmarshaler{},
-		metricsUnmarshalers: map[string]MetricsUnmarshaler{},
-		logsUnmarshalers:    map[string]LogsUnmarshaler{},
+		tracesUnmarshalers:   map[string]TracesUnmarshaler{},
+		metricsUnmarshalers:  map[string]MetricsUnmarshaler{},
+		logsUnmarshalers:     map[string]LogsUnmarshaler{},
+		logsCustomExtractors: map[string]CustomExtractor{},
 	}
 	for _, o := range options {
 		o(f)
@@ -149,13 +150,12 @@ func createDefaultConfig() component.Config {
 }
 
 type kafkaReceiverFactory struct {
-	tracesUnmarshalers  map[string]TracesUnmarshaler
-	metricsUnmarshalers map[string]MetricsUnmarshaler
-	logsUnmarshalers    map[string]LogsUnmarshaler
-	traceHandlerHook    func() HandlerHook
-	metricHandlerHook   func() HandlerHook
-	logHandlerHook      func() HandlerHook
-
+	tracesUnmarshalers   map[string]TracesUnmarshaler
+	metricsUnmarshalers  map[string]MetricsUnmarshaler
+	logsUnmarshalers     map[string]LogsUnmarshaler
+	traceHandlerHook     func() HandlerHook
+	metricHandlerHook    func() HandlerHook
+	logHandlerHook       func() HandlerHook
 	logsCustomExtractors map[string]CustomExtractor
 }
 

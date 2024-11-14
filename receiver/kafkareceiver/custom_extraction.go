@@ -15,6 +15,7 @@ type noCustomExtractor struct {
 }
 
 func (n *noCustomExtractor) Name() string {
+	return ""
 }
 
 func (n *noCustomExtractor) ExtractLogs(context.Context, plog.Logs, *sarama.ConsumerMessage) {

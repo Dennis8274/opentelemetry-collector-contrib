@@ -5,6 +5,7 @@ package fileexporter // import "github.com/open-telemetry/opentelemetry-collecto
 
 import (
 	"bytes"
+	"sync"
 
 	snappy "github.com/eapache/go-xerial-snappy"
 	"github.com/klauspost/compress/zstd"
@@ -17,7 +18,11 @@ type compressFunc func(src []byte) []byte
 var (
 	encoder, _ = zstd.NewWriter(nil)
 
-	lz4Encoder = lz4.NewWriter(nil)
+	lz4WriterPool = sync.Pool{
+		New: func() interface{} {
+			return lz4.NewWriter(nil)
+		},
+	}
 )
 
 var encoders = map[string]compressFunc{
@@ -43,9 +48,16 @@ func snappyCompress(src []byte) []byte {
 }
 
 func lz4Compress(src []byte) []byte {
+	writer := lz4WriterPool.Get().(*lz4.Writer)
+	defer lz4WriterPool.Put(writer)
+
 	var buf bytes.Buffer
-	lz4Encoder.Reset(&buf)
-	if _, err := lz4Encoder.Write(src); err != nil {
+	writer.Reset(&buf)
+
+	if _, err := writer.Write(src); err != nil {
+		return nil
+	}
+	if err := writer.Close(); err != nil {
 		return nil
 	}
 	return buf.Bytes()

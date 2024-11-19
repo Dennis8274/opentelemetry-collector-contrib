@@ -32,7 +32,9 @@ const (
 	formatTypeProto = "proto"
 
 	// the type of compression codec
-	compressionZSTD = "zstd"
+	compressionZSTD   = "zstd"
+	compressionSnappy = "snappy"
+	compressionLZ4    = "lz4"
 
 	defaultMaxOpenFiles = 100
 

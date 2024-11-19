@@ -107,10 +107,10 @@ func (cfg *Config) Validate() error {
 	if cfg.Append && cfg.Rotation != nil {
 		return fmt.Errorf("append and rotation enabled at the same time is not supported")
 	}
-	if cfg.FormatType != formatTypeJSON && cfg.FormatType != formatTypeProto {
+	if cfg.Encoding == nil && cfg.FormatType != formatTypeJSON && cfg.FormatType != formatTypeProto {
 		return errors.New("format type is not supported")
 	}
-	if cfg.Compression != "" && cfg.Compression != compressionZSTD {
+	if cfg.Compression != "" && cfg.Compression != compressionZSTD && cfg.Compression != compressionLZ4 && cfg.Compression != compressionSnappy {
 		return errors.New("compression is not supported")
 	}
 	if cfg.FlushInterval < 0 {

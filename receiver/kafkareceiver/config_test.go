@@ -65,7 +65,6 @@ func TestLoadConfig(t *testing.T) {
 			},
 		},
 		{
-
 			id: component.NewIDWithName(metadata.Type, "logs"),
 			expected: &Config{
 				Topic:             "logs",

@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"go.opentelemetry.io/collector/component"
+	"go.opentelemetry.io/collector/confmap"
 
 	"github.com/open-telemetry/opentelemetry-collector-contrib/exporter/kafkaexporter"
 	"github.com/open-telemetry/opentelemetry-collector-contrib/internal/kafka"
@@ -78,6 +79,18 @@ type Config struct {
 
 	// Extract headers from kafka records
 	HeaderExtraction HeaderExtraction `mapstructure:"header_extraction"`
+
+	CustomExtractorName string `mapstructure:"custom_extractor"`
+}
+
+func (cfg *Config) UnmarshalAuth(authRaw map[string]any) error {
+	conf := confmap.NewFromStringMap(authRaw)
+
+	err := conf.Unmarshal(&cfg.Authentication)
+	if err != nil {
+		return err
+	}
+	return nil
 }
 
 const (

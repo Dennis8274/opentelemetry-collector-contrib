@@ -28,10 +28,27 @@ const (
 	transport = "kafka"
 	// TODO: update the following attributes to reflect semconv
 	attrInstanceName = "name"
+	attrTopic        = "topic"
 	attrPartition    = "partition"
+
+	kafkaMarkMessageCallback = 1
+
+	AttrKeyRecvTopic     = "receiver_topic"
+	AttrKeyRecvPartition = "receiver_partition"
+	AttrKeyRecvOffset    = "receiver_offset"
 )
 
 var errInvalidInitialOffset = fmt.Errorf("invalid initial offset")
+
+type markMessageCallback func()
+
+type HandlerHook interface {
+	sarama.ConsumerGroupHandler
+	Init(Config, receiver.Settings)
+	Start(context.Context, component.Host) error
+	Shutdown(context.Context) error
+	Ack(topic string, partition, offset int64)
+}
 
 // kafkaTracesConsumer uses sarama to consume and handle messages from kafka.
 type kafkaTracesConsumer struct {
@@ -49,6 +66,8 @@ type kafkaTracesConsumer struct {
 	messageMarking    MessageMarking
 	headerExtraction  bool
 	headers           []string
+
+	delegate HandlerHook
 }
 
 // kafkaMetricsConsumer uses sarama to consume and handle messages from kafka.
@@ -67,6 +86,8 @@ type kafkaMetricsConsumer struct {
 	messageMarking    MessageMarking
 	headerExtraction  bool
 	headers           []string
+
+	delegate HandlerHook
 }
 
 // kafkaLogsConsumer uses sarama to consume and handle messages from kafka.
@@ -77,6 +98,7 @@ type kafkaLogsConsumer struct {
 	topics            []string
 	cancelConsumeLoop context.CancelFunc
 	unmarshaler       LogsUnmarshaler
+	extractor         CustomExtractor
 
 	settings         receiver.Settings
 	telemetryBuilder *metadata.TelemetryBuilder
@@ -85,13 +107,15 @@ type kafkaLogsConsumer struct {
 	messageMarking    MessageMarking
 	headerExtraction  bool
 	headers           []string
+
+	delegate HandlerHook
 }
 
 var _ receiver.Traces = (*kafkaTracesConsumer)(nil)
 var _ receiver.Metrics = (*kafkaMetricsConsumer)(nil)
 var _ receiver.Logs = (*kafkaLogsConsumer)(nil)
 
-func newTracesReceiver(config Config, set receiver.Settings, unmarshaler TracesUnmarshaler, nextConsumer consumer.Traces) (*kafkaTracesConsumer, error) {
+func newTracesReceiver(config Config, set receiver.Settings, unmarshaler TracesUnmarshaler, hook HandlerHook, nextConsumer consumer.Traces) (*kafkaTracesConsumer, error) {
 	if unmarshaler == nil {
 		return nil, errUnrecognizedEncoding
 	}
@@ -99,6 +123,10 @@ func newTracesReceiver(config Config, set receiver.Settings, unmarshaler TracesU
 	telemetryBuilder, err := metadata.NewTelemetryBuilder(set.TelemetrySettings)
 	if err != nil {
 		return nil, err
+	}
+
+	if hook != nil {
+		hook.Init(config, set)
 	}
 
 	return &kafkaTracesConsumer{
@@ -112,6 +140,7 @@ func newTracesReceiver(config Config, set receiver.Settings, unmarshaler TracesU
 		headerExtraction:  config.HeaderExtraction.ExtractHeaders,
 		headers:           config.HeaderExtraction.Headers,
 		telemetryBuilder:  telemetryBuilder,
+		delegate:          hook,
 	}, nil
 }
 
@@ -146,6 +175,12 @@ func createKafkaClient(config Config) (sarama.ConsumerGroup, error) {
 
 func (c *kafkaTracesConsumer) Start(_ context.Context, host component.Host) error {
 	ctx, cancel := context.WithCancel(context.Background())
+	if c.delegate != nil {
+		if err := c.delegate.Start(ctx, host); err != nil {
+			cancel()
+			return err
+		}
+	}
 	c.cancelConsumeLoop = cancel
 	obsrecv, err := receiverhelper.NewObsReport(receiverhelper.ObsReportSettings{
 		ReceiverID:             c.settings.ID,
@@ -171,6 +206,7 @@ func (c *kafkaTracesConsumer) Start(_ context.Context, host component.Host) erro
 		messageMarking:    c.messageMarking,
 		headerExtractor:   &nopHeaderExtractor{},
 		telemetryBuilder:  c.telemetryBuilder,
+		delegate:          c.delegate,
 	}
 	if c.headerExtraction {
 		consumerGroup.headerExtractor = &headerExtractor{
@@ -203,7 +239,10 @@ func (c *kafkaTracesConsumer) consumeLoop(ctx context.Context, handler sarama.Co
 	}
 }
 
-func (c *kafkaTracesConsumer) Shutdown(context.Context) error {
+func (c *kafkaTracesConsumer) Shutdown(ctx context.Context) error {
+	if c.delegate != nil {
+		_ = c.delegate.Shutdown(ctx)
+	}
 	if c.cancelConsumeLoop == nil {
 		return nil
 	}
@@ -214,7 +253,7 @@ func (c *kafkaTracesConsumer) Shutdown(context.Context) error {
 	return c.consumerGroup.Close()
 }
 
-func newMetricsReceiver(config Config, set receiver.Settings, unmarshaler MetricsUnmarshaler, nextConsumer consumer.Metrics) (*kafkaMetricsConsumer, error) {
+func newMetricsReceiver(config Config, set receiver.Settings, unmarshaler MetricsUnmarshaler, hook HandlerHook, nextConsumer consumer.Metrics) (*kafkaMetricsConsumer, error) {
 	if unmarshaler == nil {
 		return nil, errUnrecognizedEncoding
 	}
@@ -224,6 +263,9 @@ func newMetricsReceiver(config Config, set receiver.Settings, unmarshaler Metric
 		return nil, err
 	}
 
+	if hook != nil {
+		hook.Init(config, set)
+	}
 	return &kafkaMetricsConsumer{
 		config:            config,
 		topics:            []string{config.Topic},
@@ -235,11 +277,18 @@ func newMetricsReceiver(config Config, set receiver.Settings, unmarshaler Metric
 		headerExtraction:  config.HeaderExtraction.ExtractHeaders,
 		headers:           config.HeaderExtraction.Headers,
 		telemetryBuilder:  telemetryBuilder,
+		delegate:          hook,
 	}, nil
 }
 
 func (c *kafkaMetricsConsumer) Start(_ context.Context, host component.Host) error {
 	ctx, cancel := context.WithCancel(context.Background())
+	if c.delegate != nil {
+		if err := c.delegate.Start(ctx, host); err != nil {
+			cancel()
+			return err
+		}
+	}
 	c.cancelConsumeLoop = cancel
 	obsrecv, err := receiverhelper.NewObsReport(receiverhelper.ObsReportSettings{
 		ReceiverID:             c.settings.ID,
@@ -265,6 +314,7 @@ func (c *kafkaMetricsConsumer) Start(_ context.Context, host component.Host) err
 		messageMarking:    c.messageMarking,
 		headerExtractor:   &nopHeaderExtractor{},
 		telemetryBuilder:  c.telemetryBuilder,
+		delegate:          c.delegate,
 	}
 	if c.headerExtraction {
 		metricsConsumerGroup.headerExtractor = &headerExtractor{
@@ -273,7 +323,7 @@ func (c *kafkaMetricsConsumer) Start(_ context.Context, host component.Host) err
 		}
 	}
 	go func() {
-		if err := c.consumeLoop(ctx, metricsConsumerGroup); err != nil {
+		if err := c.consumeLoop(ctx, metricsConsumerGroup); !errors.Is(err, context.Canceled) {
 			componentstatus.ReportStatus(host, componentstatus.NewFatalErrorEvent(err))
 		}
 	}()
@@ -308,7 +358,7 @@ func (c *kafkaMetricsConsumer) Shutdown(context.Context) error {
 	return c.consumerGroup.Close()
 }
 
-func newLogsReceiver(config Config, set receiver.Settings, unmarshaler LogsUnmarshaler, nextConsumer consumer.Logs) (*kafkaLogsConsumer, error) {
+func newLogsReceiver(config Config, set receiver.Settings, unmarshaler LogsUnmarshaler, extractor CustomExtractor, hook HandlerHook, nextConsumer consumer.Logs) (*kafkaLogsConsumer, error) {
 	if unmarshaler == nil {
 		return nil, errUnrecognizedEncoding
 	}
@@ -318,22 +368,33 @@ func newLogsReceiver(config Config, set receiver.Settings, unmarshaler LogsUnmar
 		return nil, err
 	}
 
+	if hook != nil {
+		hook.Init(config, set)
+	}
 	return &kafkaLogsConsumer{
 		config:            config,
 		topics:            []string{config.Topic},
 		nextConsumer:      nextConsumer,
 		unmarshaler:       unmarshaler,
+		extractor:         extractor,
 		settings:          set,
 		autocommitEnabled: config.AutoCommit.Enable,
 		messageMarking:    config.MessageMarking,
 		headerExtraction:  config.HeaderExtraction.ExtractHeaders,
 		headers:           config.HeaderExtraction.Headers,
 		telemetryBuilder:  telemetryBuilder,
+		delegate:          hook,
 	}, nil
 }
 
 func (c *kafkaLogsConsumer) Start(_ context.Context, host component.Host) error {
 	ctx, cancel := context.WithCancel(context.Background())
+	if c.delegate != nil {
+		if err := c.delegate.Start(ctx, host); err != nil {
+			cancel()
+			return err
+		}
+	}
 	c.cancelConsumeLoop = cancel
 	obsrecv, err := receiverhelper.NewObsReport(receiverhelper.ObsReportSettings{
 		ReceiverID:             c.settings.ID,
@@ -359,6 +420,8 @@ func (c *kafkaLogsConsumer) Start(_ context.Context, host component.Host) error 
 		messageMarking:    c.messageMarking,
 		headerExtractor:   &nopHeaderExtractor{},
 		telemetryBuilder:  c.telemetryBuilder,
+		customExtractor:   c.extractor,
+		delegate:          c.delegate,
 	}
 	if c.headerExtraction {
 		logsConsumerGroup.headerExtractor = &headerExtractor{
@@ -367,7 +430,7 @@ func (c *kafkaLogsConsumer) Start(_ context.Context, host component.Host) error 
 		}
 	}
 	go func() {
-		if err := c.consumeLoop(ctx, logsConsumerGroup); err != nil {
+		if err := c.consumeLoop(ctx, logsConsumerGroup); !errors.Is(err, context.Canceled) {
 			componentstatus.ReportStatus(host, componentstatus.NewFatalErrorEvent(err))
 		}
 	}()
@@ -417,6 +480,7 @@ type tracesConsumerGroupHandler struct {
 	autocommitEnabled bool
 	messageMarking    MessageMarking
 	headerExtractor   HeaderExtractor
+	delegate          HandlerHook
 }
 
 type metricsConsumerGroupHandler struct {
@@ -434,6 +498,7 @@ type metricsConsumerGroupHandler struct {
 	autocommitEnabled bool
 	messageMarking    MessageMarking
 	headerExtractor   HeaderExtractor
+	delegate          HandlerHook
 }
 
 type logsConsumerGroupHandler struct {
@@ -450,7 +515,9 @@ type logsConsumerGroupHandler struct {
 
 	autocommitEnabled bool
 	messageMarking    MessageMarking
+	customExtractor   CustomExtractor
 	headerExtractor   HeaderExtractor
+	delegate          HandlerHook
 }
 
 var _ sarama.ConsumerGroupHandler = (*tracesConsumerGroupHandler)(nil)
@@ -462,16 +529,27 @@ func (c *tracesConsumerGroupHandler) Setup(session sarama.ConsumerGroupSession) 
 		close(c.ready)
 	})
 	c.telemetryBuilder.KafkaReceiverPartitionStart.Add(session.Context(), 1, metric.WithAttributes(attribute.String(attrInstanceName, c.id.Name())))
+	if c.delegate != nil {
+		return c.delegate.Setup(session)
+	}
 	return nil
 }
 
 func (c *tracesConsumerGroupHandler) Cleanup(session sarama.ConsumerGroupSession) error {
 	c.telemetryBuilder.KafkaReceiverPartitionClose.Add(session.Context(), 1, metric.WithAttributes(attribute.String(attrInstanceName, c.id.Name())))
+	if c.delegate != nil {
+		return c.delegate.Cleanup(session)
+	}
 	return nil
 }
 
 func (c *tracesConsumerGroupHandler) ConsumeClaim(session sarama.ConsumerGroupSession, claim sarama.ConsumerGroupClaim) error {
 	c.logger.Info("Starting consumer group", zap.Int32("partition", claim.Partition()))
+	if c.delegate != nil {
+		if err := c.delegate.ConsumeClaim(session, claim); err != nil {
+			return err
+		}
+	}
 	if !c.autocommitEnabled {
 		defer session.Commit()
 	}
@@ -492,6 +570,7 @@ func (c *tracesConsumerGroupHandler) ConsumeClaim(session sarama.ConsumerGroupSe
 			ctx := c.obsrecv.StartTracesOp(session.Context())
 			attrs := attribute.NewSet(
 				attribute.String(attrInstanceName, c.id.String()),
+				attribute.String(attrTopic, claim.Topic()),
 				attribute.String(attrPartition, strconv.Itoa(int(claim.Partition()))),
 			)
 			c.telemetryBuilder.KafkaReceiverMessages.Add(ctx, 1, metric.WithAttributeSet(attrs))
@@ -539,16 +618,27 @@ func (c *metricsConsumerGroupHandler) Setup(session sarama.ConsumerGroupSession)
 		close(c.ready)
 	})
 	c.telemetryBuilder.KafkaReceiverPartitionStart.Add(session.Context(), 1, metric.WithAttributes(attribute.String(attrInstanceName, c.id.Name())))
+	if c.delegate != nil {
+		return c.delegate.Setup(session)
+	}
 	return nil
 }
 
 func (c *metricsConsumerGroupHandler) Cleanup(session sarama.ConsumerGroupSession) error {
 	c.telemetryBuilder.KafkaReceiverPartitionClose.Add(session.Context(), 1, metric.WithAttributes(attribute.String(attrInstanceName, c.id.Name())))
+	if c.delegate != nil {
+		return c.delegate.Cleanup(session)
+	}
 	return nil
 }
 
 func (c *metricsConsumerGroupHandler) ConsumeClaim(session sarama.ConsumerGroupSession, claim sarama.ConsumerGroupClaim) error {
 	c.logger.Info("Starting consumer group", zap.Int32("partition", claim.Partition()))
+	if c.delegate != nil {
+		if err := c.delegate.ConsumeClaim(session, claim); err != nil {
+			return err
+		}
+	}
 	if !c.autocommitEnabled {
 		defer session.Commit()
 	}
@@ -569,6 +659,7 @@ func (c *metricsConsumerGroupHandler) ConsumeClaim(session sarama.ConsumerGroupS
 			ctx := c.obsrecv.StartMetricsOp(session.Context())
 			attrs := attribute.NewSet(
 				attribute.String(attrInstanceName, c.id.String()),
+				attribute.String(attrTopic, claim.Topic()),
 				attribute.String(attrPartition, strconv.Itoa(int(claim.Partition()))),
 			)
 			c.telemetryBuilder.KafkaReceiverMessages.Add(ctx, 1, metric.WithAttributeSet(attrs))
@@ -584,10 +675,24 @@ func (c *metricsConsumerGroupHandler) ConsumeClaim(session sarama.ConsumerGroupS
 				}
 				return err
 			}
+
+			topic := message.Topic
+			partition := int64(message.Partition)
+			offset := message.Offset
+			resourceMetrics := metrics.ResourceMetrics()
+			for i := 0; i < resourceMetrics.Len(); i++ {
+				attributes := resourceMetrics.At(i).Resource().Attributes()
+				attributes.PutStr(AttrKeyRecvTopic, topic)
+				attributes.PutInt(AttrKeyRecvPartition, partition)
+				attributes.PutInt(AttrKeyRecvOffset, offset)
+			}
+
 			c.headerExtractor.extractHeadersMetrics(metrics, message)
 
 			dataPointCount := metrics.DataPointCount()
-			err = c.nextConsumer.ConsumeMetrics(session.Context(), metrics)
+			err = c.nextConsumer.ConsumeMetrics(context.WithValue(session.Context(), kafkaMarkMessageCallback, markMessageCallback(func() {
+				c.delegate.Ack(topic, partition, offset)
+			})), metrics)
 			c.obsrecv.EndMetricsOp(ctx, c.unmarshaler.Encoding(), dataPointCount, err)
 			if err != nil {
 				if c.messageMarking.After && c.messageMarking.OnError {
@@ -616,16 +721,27 @@ func (c *logsConsumerGroupHandler) Setup(session sarama.ConsumerGroupSession) er
 		close(c.ready)
 	})
 	c.telemetryBuilder.KafkaReceiverPartitionStart.Add(session.Context(), 1, metric.WithAttributes(attribute.String(attrInstanceName, c.id.String())))
+	if c.delegate != nil {
+		return c.delegate.Setup(session)
+	}
 	return nil
 }
 
 func (c *logsConsumerGroupHandler) Cleanup(session sarama.ConsumerGroupSession) error {
 	c.telemetryBuilder.KafkaReceiverPartitionClose.Add(session.Context(), 1, metric.WithAttributes(attribute.String(attrInstanceName, c.id.String())))
+	if c.delegate != nil {
+		return c.delegate.Cleanup(session)
+	}
 	return nil
 }
 
 func (c *logsConsumerGroupHandler) ConsumeClaim(session sarama.ConsumerGroupSession, claim sarama.ConsumerGroupClaim) error {
 	c.logger.Info("Starting consumer group", zap.Int32("partition", claim.Partition()))
+	if c.delegate != nil {
+		if err := c.delegate.ConsumeClaim(session, claim); err != nil {
+			return err
+		}
+	}
 	if !c.autocommitEnabled {
 		defer session.Commit()
 	}
@@ -636,6 +752,7 @@ func (c *logsConsumerGroupHandler) ConsumeClaim(session sarama.ConsumerGroupSess
 				return nil
 			}
 			c.logger.Debug("Kafka message claimed",
+				zap.String("key", string(message.Key)),
 				zap.String("value", string(message.Value)),
 				zap.Time("timestamp", message.Timestamp),
 				zap.String("topic", message.Topic))
@@ -646,6 +763,7 @@ func (c *logsConsumerGroupHandler) ConsumeClaim(session sarama.ConsumerGroupSess
 			ctx := c.obsrecv.StartLogsOp(session.Context())
 			attrs := attribute.NewSet(
 				attribute.String(attrInstanceName, c.id.String()),
+				attribute.String(attrTopic, claim.Topic()),
 				attribute.String(attrPartition, strconv.Itoa(int(claim.Partition()))),
 			)
 			c.telemetryBuilder.KafkaReceiverMessages.Add(ctx, 1, metric.WithAttributeSet(attrs))
@@ -662,8 +780,22 @@ func (c *logsConsumerGroupHandler) ConsumeClaim(session sarama.ConsumerGroupSess
 				return err
 			}
 			c.headerExtractor.extractHeadersLogs(logs, message)
+			c.customExtractor.ExtractLogs(session.Context(), logs, message)
+
+			topic := message.Topic
+			partition := int64(message.Partition)
+			offset := message.Offset
+			resourceLogs := logs.ResourceLogs()
+			for i := 0; i < resourceLogs.Len(); i++ {
+				attributes := resourceLogs.At(i).Resource().Attributes()
+				attributes.PutStr(AttrKeyRecvTopic, topic)
+				attributes.PutInt(AttrKeyRecvPartition, partition)
+				attributes.PutInt(AttrKeyRecvOffset, offset)
+			}
 			logRecordCount := logs.LogRecordCount()
-			err = c.nextConsumer.ConsumeLogs(session.Context(), logs)
+			err = c.nextConsumer.ConsumeLogs(context.WithValue(session.Context(), kafkaMarkMessageCallback, markMessageCallback(func() {
+				c.delegate.Ack(topic, partition, offset)
+			})), logs)
 			c.obsrecv.EndLogsOp(ctx, c.unmarshaler.Encoding(), logRecordCount, err)
 			if err != nil {
 				if c.messageMarking.After && c.messageMarking.OnError {
@@ -685,6 +817,18 @@ func (c *logsConsumerGroupHandler) ConsumeClaim(session sarama.ConsumerGroupSess
 			return nil
 		}
 	}
+}
+
+func MarkMessage(ctx context.Context) {
+	value := ctx.Value(kafkaMarkMessageCallback)
+	if value == nil {
+		return
+	}
+	callback, ok := value.(markMessageCallback)
+	if !ok {
+		return
+	}
+	callback()
 }
 
 func toSaramaInitialOffset(initialOffset string) (int64, error) {

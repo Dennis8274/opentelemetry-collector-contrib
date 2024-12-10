@@ -34,7 +34,9 @@ func TestCreateTracesReceiver(t *testing.T) {
 	cfg := createDefaultConfig().(*Config)
 	cfg.Brokers = []string{"invalid:9092"}
 	cfg.ProtocolVersion = "2.0.0"
-	f := kafkaReceiverFactory{tracesUnmarshalers: defaultTracesUnmarshalers()}
+	f := kafkaReceiverFactory{tracesUnmarshalers: defaultTracesUnmarshalers(), traceHandlerHook: func() HandlerHook {
+		return nil
+	}}
 	r, err := f.createTracesReceiver(context.Background(), receivertest.NewNopSettings(), cfg, nil)
 	require.NoError(t, err)
 	// no available broker
@@ -43,7 +45,9 @@ func TestCreateTracesReceiver(t *testing.T) {
 
 func TestWithTracesUnmarshalers(t *testing.T) {
 	unmarshaler := &customTracesUnmarshaler{}
-	f := NewFactory(withTracesUnmarshalers(unmarshaler))
+	f := NewFactory(WithTracesUnmarshalers(unmarshaler), WithTraceConsumerGroupHandlerHook(func() HandlerHook {
+		return nil
+	}))
 	cfg := createDefaultConfig().(*Config)
 	// disable contacting broker
 	cfg.Metadata.Full = false
@@ -73,7 +77,9 @@ func TestCreateMetricsReceiver(t *testing.T) {
 	cfg := createDefaultConfig().(*Config)
 	cfg.Brokers = []string{"invalid:9092"}
 	cfg.ProtocolVersion = "2.0.0"
-	f := kafkaReceiverFactory{metricsUnmarshalers: defaultMetricsUnmarshalers()}
+	f := kafkaReceiverFactory{metricsUnmarshalers: defaultMetricsUnmarshalers(), metricHandlerHook: func() HandlerHook {
+		return nil
+	}}
 	r, err := f.createMetricsReceiver(context.Background(), receivertest.NewNopSettings(), cfg, nil)
 	require.NoError(t, err)
 	// no available broker
@@ -82,7 +88,9 @@ func TestCreateMetricsReceiver(t *testing.T) {
 
 func TestWithMetricsUnmarshalers(t *testing.T) {
 	unmarshaler := &customMetricsUnmarshaler{}
-	f := NewFactory(withMetricsUnmarshalers(unmarshaler))
+	f := NewFactory(WithMetricsUnmarshalers(unmarshaler), WithMetricConsumerGroupHandlerHook(func() HandlerHook {
+		return nil
+	}))
 	cfg := createDefaultConfig().(*Config)
 	// disable contacting broker
 	cfg.Metadata.Full = false
@@ -112,7 +120,9 @@ func TestCreateLogsReceiver(t *testing.T) {
 	cfg := createDefaultConfig().(*Config)
 	cfg.Brokers = []string{"invalid:9092"}
 	cfg.ProtocolVersion = "2.0.0"
-	f := kafkaReceiverFactory{logsUnmarshalers: defaultLogsUnmarshalers("Test Version", zap.NewNop())}
+	f := kafkaReceiverFactory{logsUnmarshalers: defaultLogsUnmarshalers("Test Version", zap.NewNop()), logHandlerHook: func() HandlerHook {
+		return nil
+	}}
 	r, err := f.createLogsReceiver(context.Background(), receivertest.NewNopSettings(), cfg, nil)
 	require.NoError(t, err)
 	// no available broker
@@ -143,7 +153,9 @@ func TestGetLogsUnmarshaler_encoding_text_error(t *testing.T) {
 
 func TestWithLogsUnmarshalers(t *testing.T) {
 	unmarshaler := &customLogsUnmarshaler{}
-	f := NewFactory(withLogsUnmarshalers(unmarshaler))
+	f := NewFactory(WithLogsUnmarshalers(unmarshaler), WithLogConsumerGroupHandlerHook(func() HandlerHook {
+		return nil
+	}))
 	cfg := createDefaultConfig().(*Config)
 	// disable contacting broker
 	cfg.Metadata.Full = false

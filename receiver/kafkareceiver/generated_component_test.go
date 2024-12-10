@@ -24,7 +24,13 @@ func TestComponentConfigStruct(t *testing.T) {
 }
 
 func TestComponentLifecycle(t *testing.T) {
-	factory := NewFactory()
+	factory := NewFactory(WithLogConsumerGroupHandlerHook(func() HandlerHook {
+		return nil
+	}), WithMetricConsumerGroupHandlerHook(func() HandlerHook {
+		return nil
+	}), WithTraceConsumerGroupHandlerHook(func() HandlerHook {
+		return nil
+	}))
 
 	tests := []struct {
 		name     string

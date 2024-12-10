@@ -47,8 +47,8 @@ var errUnrecognizedEncoding = fmt.Errorf("unrecognized encoding")
 // FactoryOption applies changes to kafkaExporterFactory.
 type FactoryOption func(factory *kafkaReceiverFactory)
 
-// withTracesUnmarshalers adds Unmarshalers.
-func withTracesUnmarshalers(tracesUnmarshalers ...TracesUnmarshaler) FactoryOption {
+// WithTracesUnmarshalers adds Unmarshalers.
+func WithTracesUnmarshalers(tracesUnmarshalers ...TracesUnmarshaler) FactoryOption {
 	return func(factory *kafkaReceiverFactory) {
 		for _, unmarshaler := range tracesUnmarshalers {
 			factory.tracesUnmarshalers[unmarshaler.Encoding()] = unmarshaler
@@ -56,8 +56,8 @@ func withTracesUnmarshalers(tracesUnmarshalers ...TracesUnmarshaler) FactoryOpti
 	}
 }
 
-// withMetricsUnmarshalers adds MetricsUnmarshalers.
-func withMetricsUnmarshalers(metricsUnmarshalers ...MetricsUnmarshaler) FactoryOption {
+// WithMetricsUnmarshalers adds MetricsUnmarshalers.
+func WithMetricsUnmarshalers(metricsUnmarshalers ...MetricsUnmarshaler) FactoryOption {
 	return func(factory *kafkaReceiverFactory) {
 		for _, unmarshaler := range metricsUnmarshalers {
 			factory.metricsUnmarshalers[unmarshaler.Encoding()] = unmarshaler
@@ -65,8 +65,8 @@ func withMetricsUnmarshalers(metricsUnmarshalers ...MetricsUnmarshaler) FactoryO
 	}
 }
 
-// withLogsUnmarshalers adds LogsUnmarshalers.
-func withLogsUnmarshalers(logsUnmarshalers ...LogsUnmarshaler) FactoryOption {
+// WithLogsUnmarshalers adds LogsUnmarshalers.
+func WithLogsUnmarshalers(logsUnmarshalers ...LogsUnmarshaler) FactoryOption {
 	return func(factory *kafkaReceiverFactory) {
 		for _, unmarshaler := range logsUnmarshalers {
 			factory.logsUnmarshalers[unmarshaler.Encoding()] = unmarshaler
@@ -74,12 +74,39 @@ func withLogsUnmarshalers(logsUnmarshalers ...LogsUnmarshaler) FactoryOption {
 	}
 }
 
+func WithLogsCustomExtractor(extractors ...CustomExtractor) FactoryOption {
+	return func(factory *kafkaReceiverFactory) {
+		for _, extractor := range extractors {
+			factory.logsCustomExtractors[extractor.Name()] = extractor
+		}
+	}
+}
+
+func WithTraceConsumerGroupHandlerHook(hookFactory func() HandlerHook) FactoryOption {
+	return func(factory *kafkaReceiverFactory) {
+		factory.traceHandlerHook = hookFactory
+	}
+}
+
+func WithMetricConsumerGroupHandlerHook(hookFactory func() HandlerHook) FactoryOption {
+	return func(factory *kafkaReceiverFactory) {
+		factory.metricHandlerHook = hookFactory
+	}
+}
+
+func WithLogConsumerGroupHandlerHook(hookFactory func() HandlerHook) FactoryOption {
+	return func(factory *kafkaReceiverFactory) {
+		factory.logHandlerHook = hookFactory
+	}
+}
+
 // NewFactory creates Kafka receiver factory.
 func NewFactory(options ...FactoryOption) receiver.Factory {
 	f := &kafkaReceiverFactory{
-		tracesUnmarshalers:  map[string]TracesUnmarshaler{},
-		metricsUnmarshalers: map[string]MetricsUnmarshaler{},
-		logsUnmarshalers:    map[string]LogsUnmarshaler{},
+		tracesUnmarshalers:   map[string]TracesUnmarshaler{},
+		metricsUnmarshalers:  map[string]MetricsUnmarshaler{},
+		logsUnmarshalers:     map[string]LogsUnmarshaler{},
+		logsCustomExtractors: map[string]CustomExtractor{},
 	}
 	for _, o := range options {
 		o(f)
@@ -124,9 +151,13 @@ func createDefaultConfig() component.Config {
 }
 
 type kafkaReceiverFactory struct {
-	tracesUnmarshalers  map[string]TracesUnmarshaler
-	metricsUnmarshalers map[string]MetricsUnmarshaler
-	logsUnmarshalers    map[string]LogsUnmarshaler
+	tracesUnmarshalers   map[string]TracesUnmarshaler
+	metricsUnmarshalers  map[string]MetricsUnmarshaler
+	logsUnmarshalers     map[string]LogsUnmarshaler
+	traceHandlerHook     func() HandlerHook
+	metricHandlerHook    func() HandlerHook
+	logHandlerHook       func() HandlerHook
+	logsCustomExtractors map[string]CustomExtractor
 }
 
 func (f *kafkaReceiverFactory) createTracesReceiver(
@@ -148,7 +179,7 @@ func (f *kafkaReceiverFactory) createTracesReceiver(
 		return nil, errUnrecognizedEncoding
 	}
 
-	r, err := newTracesReceiver(oCfg, set, unmarshaler, nextConsumer)
+	r, err := newTracesReceiver(oCfg, set, unmarshaler, f.traceHandlerHook(), nextConsumer)
 	if err != nil {
 		return nil, err
 	}
@@ -174,7 +205,7 @@ func (f *kafkaReceiverFactory) createMetricsReceiver(
 		return nil, errUnrecognizedEncoding
 	}
 
-	r, err := newMetricsReceiver(oCfg, set, unmarshaler, nextConsumer)
+	r, err := newMetricsReceiver(oCfg, set, unmarshaler, f.metricHandlerHook(), nextConsumer)
 	if err != nil {
 		return nil, err
 	}
@@ -200,7 +231,12 @@ func (f *kafkaReceiverFactory) createLogsReceiver(
 		return nil, err
 	}
 
-	r, err := newLogsReceiver(oCfg, set, unmarshaler, nextConsumer)
+	var customExtractor CustomExtractor = &noCustomExtractor{}
+	if extractor, exist := f.logsCustomExtractors[oCfg.CustomExtractorName]; exist {
+		customExtractor = extractor
+	}
+
+	r, err := newLogsReceiver(oCfg, set, unmarshaler, customExtractor, f.logHandlerHook(), nextConsumer)
 	if err != nil {
 		return nil, err
 	}

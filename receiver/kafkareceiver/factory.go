@@ -40,6 +40,13 @@ const (
 	defaultAutoCommitEnable = true
 	// default from sarama.NewConfig()
 	defaultAutoCommitInterval = 1 * time.Second
+
+	// default minimum bytes per fetch from Kafka (default "1")
+	defaultMinFetchSize = int32(1)
+	// default bytes per fetch from Kafka (default "1048576")
+	defaultDefaultFetchSize = int32(1048576)
+	// default maximum bytes per fetch from Kafka (default "0", no limit)
+	defaultMaxFetchSize = int32(0)
 )
 
 var errUnrecognizedEncoding = fmt.Errorf("unrecognized encoding")
@@ -147,6 +154,9 @@ func createDefaultConfig() component.Config {
 		HeaderExtraction: HeaderExtraction{
 			ExtractHeaders: false,
 		},
+		MinFetchSize:     defaultMinFetchSize,
+		DefaultFetchSize: defaultDefaultFetchSize,
+		MaxFetchSize:     defaultMaxFetchSize,
 	}
 }
 

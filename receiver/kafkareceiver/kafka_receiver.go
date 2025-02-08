@@ -154,6 +154,9 @@ func createKafkaClient(config Config) (sarama.ConsumerGroup, error) {
 	saramaConfig.Consumer.Offsets.AutoCommit.Interval = config.AutoCommit.Interval
 	saramaConfig.Consumer.Group.Session.Timeout = config.SessionTimeout
 	saramaConfig.Consumer.Group.Heartbeat.Interval = config.HeartbeatInterval
+	saramaConfig.Consumer.Fetch.Min = config.MinFetchSize
+	saramaConfig.Consumer.Fetch.Default = config.DefaultFetchSize
+	saramaConfig.Consumer.Fetch.Max = config.MaxFetchSize
 
 	var err error
 	if saramaConfig.Consumer.Offsets.Initial, err = toSaramaInitialOffset(config.InitialOffset); err != nil {
@@ -574,6 +577,7 @@ func (c *tracesConsumerGroupHandler) ConsumeClaim(session sarama.ConsumerGroupSe
 				attribute.String(attrPartition, strconv.Itoa(int(claim.Partition()))),
 			)
 			c.telemetryBuilder.KafkaReceiverMessages.Add(ctx, 1, metric.WithAttributeSet(attrs))
+			c.telemetryBuilder.KafkaReceiverMessageSize.Record(ctx, int64(len(message.Value)), metric.WithAttributeSet(attrs))
 			c.telemetryBuilder.KafkaReceiverCurrentOffset.Record(ctx, message.Offset, metric.WithAttributeSet(attrs))
 			c.telemetryBuilder.KafkaReceiverOffsetLag.Record(ctx, claim.HighWaterMarkOffset()-message.Offset-1, metric.WithAttributeSet(attrs))
 
@@ -663,6 +667,7 @@ func (c *metricsConsumerGroupHandler) ConsumeClaim(session sarama.ConsumerGroupS
 				attribute.String(attrPartition, strconv.Itoa(int(claim.Partition()))),
 			)
 			c.telemetryBuilder.KafkaReceiverMessages.Add(ctx, 1, metric.WithAttributeSet(attrs))
+			c.telemetryBuilder.KafkaReceiverMessageSize.Record(ctx, int64(len(message.Value)), metric.WithAttributeSet(attrs))
 			c.telemetryBuilder.KafkaReceiverCurrentOffset.Record(ctx, message.Offset, metric.WithAttributeSet(attrs))
 			c.telemetryBuilder.KafkaReceiverOffsetLag.Record(ctx, claim.HighWaterMarkOffset()-message.Offset-1, metric.WithAttributeSet(attrs))
 
@@ -768,6 +773,7 @@ func (c *logsConsumerGroupHandler) ConsumeClaim(session sarama.ConsumerGroupSess
 				attribute.String(attrPartition, strconv.Itoa(int(claim.Partition()))),
 			)
 			c.telemetryBuilder.KafkaReceiverMessages.Add(ctx, 1, metric.WithAttributeSet(attrs))
+			c.telemetryBuilder.KafkaReceiverMessageSize.Record(ctx, int64(len(message.Value)), metric.WithAttributeSet(attrs))
 			c.telemetryBuilder.KafkaReceiverCurrentOffset.Record(ctx, message.Offset, metric.WithAttributeSet(attrs))
 			c.telemetryBuilder.KafkaReceiverOffsetLag.Record(ctx, claim.HighWaterMarkOffset()-message.Offset-1, metric.WithAttributeSet(attrs))
 

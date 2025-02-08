@@ -1,4 +1,4 @@
-module github.com/XMingG99/opentelemetry-collector-contrib/receiver/kafkareceiver
+module github.com/open-telemetry/opentelemetry-collector-contrib/receiver/kafkareceiver
 
 go 1.22.0
 

@@ -47,6 +47,9 @@ const (
 	defaultDefaultFetchSize = int32(1048576)
 	// default maximum bytes per fetch from Kafka (default "0", no limit)
 	defaultMaxFetchSize = int32(0)
+
+	defaultChannelBufferSize = 1024
+	defaultMaxProcessingTime = 512 * time.Millisecond
 )
 
 var errUnrecognizedEncoding = fmt.Errorf("unrecognized encoding")
@@ -154,9 +157,11 @@ func createDefaultConfig() component.Config {
 		HeaderExtraction: HeaderExtraction{
 			ExtractHeaders: false,
 		},
-		MinFetchSize:     defaultMinFetchSize,
-		DefaultFetchSize: defaultDefaultFetchSize,
-		MaxFetchSize:     defaultMaxFetchSize,
+		MinFetchSize:      defaultMinFetchSize,
+		DefaultFetchSize:  defaultDefaultFetchSize,
+		MaxFetchSize:      defaultMaxFetchSize,
+		ChannelBufferSize: defaultChannelBufferSize,
+		MaxProcessingTime: defaultMaxProcessingTime,
 	}
 }
 

@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"strconv"
 	"sync"
+	"time"
 
 	"github.com/IBM/sarama"
 	"go.opentelemetry.io/collector/component"
@@ -18,6 +19,7 @@ import (
 	"go.opentelemetry.io/collector/receiver/receiverhelper"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/metric"
+	"go.uber.org/atomic"
 	"go.uber.org/zap"
 
 	"github.com/open-telemetry/opentelemetry-collector-contrib/internal/kafka"
@@ -107,6 +109,7 @@ type kafkaLogsConsumer struct {
 	messageMarking    MessageMarking
 	headerExtraction  bool
 	headers           []string
+	consumeGroupDone  chan struct{}
 
 	delegate HandlerHook
 }
@@ -388,6 +391,7 @@ func newLogsReceiver(config Config, set receiver.Settings, unmarshaler LogsUnmar
 		headerExtraction:  config.HeaderExtraction.ExtractHeaders,
 		headers:           config.HeaderExtraction.Headers,
 		telemetryBuilder:  telemetryBuilder,
+		consumeGroupDone:  make(chan struct{}),
 		delegate:          hook,
 	}, nil
 }
@@ -444,6 +448,7 @@ func (c *kafkaLogsConsumer) Start(_ context.Context, host component.Host) error 
 }
 
 func (c *kafkaLogsConsumer) consumeLoop(ctx context.Context, handler sarama.ConsumerGroupHandler) error {
+	defer close(c.consumeGroupDone)
 	for {
 		// `Consume` should be called inside an infinite loop, when a
 		// server-side rebalance happens, the consumer session will need to be
@@ -459,7 +464,10 @@ func (c *kafkaLogsConsumer) consumeLoop(ctx context.Context, handler sarama.Cons
 	}
 }
 
-func (c *kafkaLogsConsumer) Shutdown(context.Context) error {
+func (c *kafkaLogsConsumer) Shutdown(ctx context.Context) error {
+	now := time.Now()
+	c.settings.Logger.Info("[shutdown] Start closing consumer group", zap.String("topic", c.config.Topic))
+	_ = c.delegate.Shutdown(ctx)
 	if c.cancelConsumeLoop == nil {
 		return nil
 	}
@@ -467,6 +475,8 @@ func (c *kafkaLogsConsumer) Shutdown(context.Context) error {
 	if c.consumerGroup == nil {
 		return nil
 	}
+	<-c.consumeGroupDone
+	c.settings.Logger.Info("[shutdown] End closing consumer group", zap.String("topic", c.config.Topic), zap.Int64("elapse(ms)", time.Since(now).Milliseconds()))
 	return c.consumerGroup.Close()
 }
 
@@ -522,6 +532,7 @@ type logsConsumerGroupHandler struct {
 	messageMarking    MessageMarking
 	customExtractor   CustomExtractor
 	headerExtractor   HeaderExtractor
+	consumeWg         sync.WaitGroup
 	delegate          HandlerHook
 }
 
@@ -728,6 +739,7 @@ func (c *logsConsumerGroupHandler) Setup(session sarama.ConsumerGroupSession) er
 		close(c.ready)
 	})
 	c.telemetryBuilder.KafkaReceiverPartitionStart.Add(session.Context(), 1, metric.WithAttributes(attribute.String(attrInstanceName, c.id.String())))
+	c.consumeWg = sync.WaitGroup{}
 	if c.delegate != nil {
 		return c.delegate.Setup(session)
 	}
@@ -748,6 +760,7 @@ func (c *logsConsumerGroupHandler) Cleanup(session sarama.ConsumerGroupSession) 
 			c.telemetryBuilder.KafkaReceiverOffsetLag.Record(ctx, 0, metric.WithAttributeSet(attrs))
 		}
 	}
+	c.consumeWg.Wait()
 	if c.delegate != nil {
 		return c.delegate.Cleanup(session)
 	}
@@ -813,11 +826,17 @@ func (c *logsConsumerGroupHandler) ConsumeClaim(session sarama.ConsumerGroupSess
 				attributes.PutInt(AttrKeyRecvPartition, partition)
 				attributes.PutInt(AttrKeyRecvOffset, offset)
 			}
-			logRecordCount := logs.LogRecordCount()
+			ackDone := atomic.NewBool(false)
+			c.consumeWg.Add(1)
 			err = c.nextConsumer.ConsumeLogs(context.WithValue(session.Context(), kafkaMarkMessageCallback, markMessageCallback(func() {
+				if ackDone.Load() {
+					return
+				}
+				ackDone.Store(true)
 				c.delegate.Ack(topic, partition, offset)
+				c.consumeWg.Done()
 			})), logs)
-			c.obsrecv.EndLogsOp(ctx, c.unmarshaler.Encoding(), logRecordCount, err)
+			c.obsrecv.EndLogsOp(ctx, c.unmarshaler.Encoding(), logs.LogRecordCount(), err)
 			if err != nil {
 				if c.messageMarking.After && c.messageMarking.OnError {
 					session.MarkMessage(message, "")

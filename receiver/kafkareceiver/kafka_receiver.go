@@ -760,7 +760,10 @@ func (c *logsConsumerGroupHandler) Cleanup(session sarama.ConsumerGroupSession) 
 			c.telemetryBuilder.KafkaReceiverOffsetLag.Record(ctx, 0, metric.WithAttributeSet(attrs))
 		}
 	}
+	now := time.Now()
+	c.logger.Info("[shutdown] Closing consumer group handler")
 	c.consumeWg.Wait()
+	c.logger.Info("[shutdown] Closing consumer group handler end", zap.Duration("duration", time.Since(now)))
 	if c.delegate != nil {
 		return c.delegate.Cleanup(session)
 	}
@@ -829,12 +832,10 @@ func (c *logsConsumerGroupHandler) ConsumeClaim(session sarama.ConsumerGroupSess
 			ackDone := atomic.NewBool(false)
 			c.consumeWg.Add(1)
 			err = c.nextConsumer.ConsumeLogs(context.WithValue(session.Context(), kafkaMarkMessageCallback, markMessageCallback(func() {
-				if ackDone.Load() {
-					return
+				if ackDone.CompareAndSwap(false, true) {
+					defer c.consumeWg.Done()
+					c.delegate.Ack(topic, partition, offset)
 				}
-				ackDone.Store(true)
-				c.delegate.Ack(topic, partition, offset)
-				c.consumeWg.Done()
 			})), logs)
 			c.obsrecv.EndLogsOp(ctx, c.unmarshaler.Encoding(), logs.LogRecordCount(), err)
 			if err != nil {
@@ -854,6 +855,7 @@ func (c *logsConsumerGroupHandler) ConsumeClaim(session sarama.ConsumerGroupSess
 		// If not, will raise `ErrRebalanceInProgress` or `read tcp <ip>:<port>: i/o timeout` when kafka rebalance. see:
 		// https://github.com/IBM/sarama/issues/1192
 		case <-session.Context().Done():
+			c.logger.Info("[shutdown] ConsumeClaim session context done")
 			return nil
 		}
 	}

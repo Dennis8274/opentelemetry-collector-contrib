@@ -162,6 +162,7 @@ func createDefaultConfig() component.Config {
 		MaxFetchSize:      defaultMaxFetchSize,
 		ChannelBufferSize: defaultChannelBufferSize,
 		MaxProcessingTime: defaultMaxProcessingTime,
+		CleanupTimeout:    5 * time.Second,
 	}
 }
 

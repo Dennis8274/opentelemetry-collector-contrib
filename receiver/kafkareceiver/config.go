@@ -92,6 +92,8 @@ type Config struct {
 	// sarama.ConsumerConfig
 	ChannelBufferSize int           `mapstructure:"channel_buffer_size"`
 	MaxProcessingTime time.Duration `mapstructure:"max_processing_time"`
+
+	CleanupTimeout time.Duration `mapstructure:"cleanup_timeout"`
 }
 
 func (cfg *Config) UnmarshalAuth(authRaw map[string]any) error {

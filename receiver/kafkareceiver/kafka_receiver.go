@@ -431,7 +431,7 @@ func (c *kafkaLogsConsumer) Start(_ context.Context, host component.Host) error 
 		telemetryBuilder:  c.telemetryBuilder,
 		customExtractor:   c.extractor,
 		delegate:          c.delegate,
-		timer:             time.NewTimer(c.config.CleanupTimeout),
+		timeout:           c.config.CleanupTimeout,
 	}
 	if c.headerExtraction {
 		logsConsumerGroup.headerExtractor = &headerExtractor{
@@ -535,7 +535,7 @@ type logsConsumerGroupHandler struct {
 	headerExtractor   HeaderExtractor
 	consumeWg         sync.WaitGroup
 	delegate          HandlerHook
-	timer             *time.Timer
+	timeout           time.Duration
 }
 
 var _ sarama.ConsumerGroupHandler = (*tracesConsumerGroupHandler)(nil)
@@ -772,7 +772,7 @@ func (c *logsConsumerGroupHandler) Cleanup(session sarama.ConsumerGroupSession) 
 	select {
 	case <-done:
 		c.logger.Info("[Cleanup] Closing consumer group handler end", zap.Duration("duration", time.Since(now)))
-	case <-c.timer.C:
+	case <-time.After(c.timeout):
 		c.logger.Warn("[Cleanup] Timed out waiting for consumer group handler to close", zap.Duration("duration", time.Since(now)))
 	}
 	if c.delegate != nil {

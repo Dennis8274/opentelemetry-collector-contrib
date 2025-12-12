@@ -739,9 +739,9 @@ func (c *metricsConsumerGroupHandler) ConsumeClaim(session sarama.ConsumerGroupS
 func (c *logsConsumerGroupHandler) Setup(session sarama.ConsumerGroupSession) error {
 	c.readyCloser.Do(func() {
 		close(c.ready)
+		c.consumeWg = sync.WaitGroup{}
 	})
 	c.telemetryBuilder.KafkaReceiverPartitionStart.Add(session.Context(), 1, metric.WithAttributes(attribute.String(attrInstanceName, c.id.String())))
-	c.consumeWg = sync.WaitGroup{}
 	if c.delegate != nil {
 		return c.delegate.Setup(session)
 	}
